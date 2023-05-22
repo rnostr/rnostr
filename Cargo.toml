@@ -1,0 +1,24 @@
+[package]
+name = "nostr-db"
+version = "0.1.0"
+edition = "2021"
+description = "Nostr event database"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/arronzhang/nostr-db"
+repository = "https://github.com/arronzhang/nostr-db.git"
+keywords = ["nostr"]
+exclude = [
+    ".gitignore",
+]
+
+[workspace]
+members = ["nokv", "nokv/bench"]
+
+[dependencies]
+nokv = { path = "./nokv" }
+
+
+[dev-dependencies]
+anyhow = "1.0.70"
+tempfile = "3.4.0"
+

@@ -1,0 +1,22 @@
+[package]
+name = "nokv"
+version = "0.1.0"
+edition = "2021"
+description = "Lmdb"
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/arronzhang/nostr-db"
+repository = "https://github.com/arronzhang/nostr-db.git"
+keywords = ["lmdb"]
+exclude = [
+    ".gitignore",
+]
+
+[dependencies]
+libc = "0.2.141"
+lmdb-master-sys = { version = "0.1.0" }
+parking_lot = "0.12.1"
+thiserror = "1.0.40"
+
+[dev-dependencies]
+anyhow = "1.0.70"
+tempfile = "3.4.0"
