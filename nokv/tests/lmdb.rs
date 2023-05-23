@@ -51,6 +51,22 @@ pub fn test_txn() -> Result<()> {
         assert!(c.is_ok());
     }
 
+    {
+        let mut writer = db.writer()?;
+        writer.put(&t1, b"k3", b"v3")?;
+        writer.put(&t1, b"k31", b"v31")?;
+        writer.commit()?;
+
+        let reader = db.reader()?;
+        let _v1 = reader.get(&t1, "k3")?.unwrap();
+        drop(reader);
+        let reader = db.reader()?;
+        let _v2 = reader.get(&t1, "k31")?.unwrap();
+        drop(reader);
+        // println!("{:?} {:?}", _v1, _v2);
+        // println!("{:?} {:?}", _v1.as_ref(), _v2.as_ref());
+    }
+
     Ok(())
 }
 
