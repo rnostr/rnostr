@@ -1,10 +1,11 @@
+use crate::Error;
 use libc::{c_char, c_int, c_uint, c_void, size_t, EINVAL};
 pub use lmdb_master_sys as ffi;
 use parking_lot::RwLock;
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ffi::{CStr, CString, NulError},
+    ffi::{CStr, CString},
     fs,
     marker::PhantomData,
     mem,
@@ -33,14 +34,6 @@ macro_rules! lmdb_try_with_cleanup {
             }
         }
     }};
-}
-
-#[derive(thiserror::Error, Debug, Clone)]
-pub enum Error {
-    #[error(transparent)]
-    CString(#[from] NulError),
-    #[error("Lmdb error: {0}")]
-    Message(String),
 }
 
 type Result<T, E = Error> = core::result::Result<T, E>;
@@ -587,7 +580,7 @@ fn lmdb_error(err_code: c_int) -> Error {
     unsafe {
         // This is safe since the error messages returned from mdb_strerror are static.
         let err: *const c_char = ffi::mdb_strerror(err_code) as *const c_char;
-        Error::Message(std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()).to_string())
+        Error::Lmdb(std::str::from_utf8_unchecked(CStr::from_ptr(err).to_bytes()).to_string())
     }
 }
 
