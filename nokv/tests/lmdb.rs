@@ -1,9 +1,6 @@
 use anyhow::Result;
 use nokv::lmdb::{ffi, Db};
-use std::{
-    assert_eq,
-    ops::{Bound, Deref},
-};
+use std::ops::{Bound, Deref};
 
 #[test]
 pub fn test_txn() -> Result<()> {
@@ -39,7 +36,7 @@ pub fn test_txn() -> Result<()> {
         let mut writer = db.writer()?;
         writer.put(&t1, b"k2", b"v2")?;
         {
-            assert_eq!(writer.get(&t1, "k2")?.unwrap().as_ref(), b"v2");
+            assert_eq!(writer.get(&t1, "k2")?.unwrap(), b"v2");
         }
         {
             let reader = db.reader()?;
@@ -48,7 +45,7 @@ pub fn test_txn() -> Result<()> {
         let c = writer.commit();
         {
             let reader = db.reader()?;
-            assert_eq!(reader.get(&t1, "k2")?.unwrap().as_ref(), b"v2");
+            assert_eq!(reader.get(&t1, "k2")?.unwrap(), b"v2");
         }
         assert!(c.is_ok());
     }
@@ -66,7 +63,7 @@ pub fn test_txn() -> Result<()> {
         let _v2 = reader.get(&t1, "k31")?.unwrap();
         drop(reader);
         // println!("{:?} {:?}", _v1, _v2);
-        // println!("{:?} {:?}", _v1.as_ref(), _v2.as_ref());
+        // println!("{:?} {:?}", _v1, _v2);
     }
 
     Ok(())
@@ -94,8 +91,8 @@ pub fn test_put_get_del() -> Result<()> {
 
         {
             let reader = db.reader()?;
-            assert_eq!(reader.get(tree, "k1")?.unwrap().as_ref(), b"v1");
-            assert_eq!(reader.get(tree, "k2")?.unwrap().as_ref(), b"v22");
+            assert_eq!(reader.get(tree, "k1")?.unwrap(), b"v1");
+            assert_eq!(reader.get(tree, "k2")?.unwrap(), b"v22");
             assert!(reader.get(tree, "k3")?.is_none());
         }
 
@@ -114,7 +111,7 @@ pub fn test_put_get_del() -> Result<()> {
     writer.commit()?;
     {
         let reader = db.reader()?;
-        assert_eq!(reader.get(&t1, "exist")?.unwrap().as_ref(), b"ok");
+        assert_eq!(reader.get(&t1, "exist")?.unwrap(), b"ok");
     }
 
     db.drop_tree(Some("t1"))?;
@@ -129,7 +126,7 @@ pub fn test_put_get_del() -> Result<()> {
 
 macro_rules! next_key {
     ($iter:ident) => {
-        $iter.next().unwrap().unwrap().0.as_ref().to_vec()
+        $iter.next().unwrap().unwrap().0.to_vec()
     };
 }
 
@@ -269,89 +266,89 @@ pub fn test_dup() -> Result<()> {
 
         let mut iter = reader.iter_from(&tree, Bound::Unbounded::<Vec<u8>>, false);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), one);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, one);
 
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), one_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, one_ext);
 
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), two_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, two_ext);
         assert!(iter.next().is_none());
 
         let mut iter = reader.iter_from(&tree, Bound::Unbounded::<Vec<u8>>, true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), two_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, two_ext);
 
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), one_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, one_ext);
 
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), one);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, one);
         assert!(iter.next().is_none());
 
         let mut iter = reader.iter_from(&tree, Bound::Included("k3"), false);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), one_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, one_ext);
 
         let mut iter = reader.iter_from(&tree, Bound::Included("i2"), true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         let mut iter = reader.iter_from(&tree, Bound::Excluded("i1"), false);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), one_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, one_ext);
 
         let mut iter = reader.iter_from(&tree, Bound::Excluded("k3"), true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         let mut iter = reader.iter_from(&tree, Bound::Included("i2"), false);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), one_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, one_ext);
 
         let mut iter = reader.iter_from(&tree, Bound::Included("i2"), true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         iter.seek(Bound::Included("i1"), false);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), one);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, one);
 
         iter.seek(Bound::Included("i1"), true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         iter.seek(Bound::Included("k"), true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"i1");
-        assert_eq!(item.1.as_ref(), two);
+        assert_eq!(item.0, b"i1");
+        assert_eq!(item.1, two);
 
         iter.seek(Bound::Included("m"), true);
         let item = iter.next().unwrap().unwrap();
-        assert_eq!(item.0.as_ref(), b"k3");
-        assert_eq!(item.1.as_ref(), two_ext);
+        assert_eq!(item.0, b"k3");
+        assert_eq!(item.1, two_ext);
     }
 
     {
