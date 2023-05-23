@@ -45,30 +45,6 @@ pub enum Error {
 
 type Result<T, E = Error> = core::result::Result<T, E>;
 
-// #[derive(Debug)]
-// pub struct Slice {
-//     inner: ffi::MDB_val,
-// }
-
-// impl Slice {
-//     pub unsafe fn inner(&self) -> &[u8] {
-//         slice::from_raw_parts(self.inner.mv_data as *const u8, self.inner.mv_size as usize)
-//     }
-// }
-
-// impl AsRef<[u8]> for Slice {
-//     fn as_ref(&self) -> &[u8] {
-//         unsafe { self.inner() }
-//     }
-// }
-
-// impl Deref for Slice {
-//     type Target = [u8];
-//     fn deref(&self) -> &Self::Target {
-//         unsafe { self.inner() }
-//     }
-// }
-
 struct Dbi {
     inner: ffi::MDB_dbi,
 }
@@ -622,19 +598,6 @@ fn lmdb_result(err_code: c_int) -> Result<()> {
         Err(lmdb_error(err_code))
     }
 }
-
-// unsafe fn slice_to_val(slice: Option<&[u8]>) -> ffi::MDB_val {
-//     match slice {
-//         Some(slice) => ffi::MDB_val {
-//             mv_size: slice.len() as size_t,
-//             mv_data: slice.as_ptr() as *mut c_void,
-//         },
-//         None => ffi::MDB_val {
-//             mv_size: 0,
-//             mv_data: ptr::null_mut(),
-//         },
-//     }
-// }
 
 unsafe fn val_to_slice<'a>(val: ffi::MDB_val) -> &'a [u8] {
     slice::from_raw_parts(val.mv_data as *const u8, val.mv_size as usize)
