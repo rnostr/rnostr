@@ -5,12 +5,12 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     ffi::{CStr, CString, NulError},
-    fs, mem,
+    fs,
+    marker::PhantomData,
+    mem,
     ops::{Bound, Deref},
     path::Path,
-    ptr,
-    rc::Rc,
-    slice,
+    ptr, slice,
     sync::Arc,
 };
 
@@ -41,35 +41,33 @@ pub enum Error {
     CString(#[from] NulError),
     #[error("Lmdb error: {0}")]
     Message(String),
-    #[error("need drop iterators from writer first")]
-    Commit,
 }
 
 type Result<T, E = Error> = core::result::Result<T, E>;
 
-#[derive(Debug)]
-pub struct Slice {
-    inner: ffi::MDB_val,
-}
+// #[derive(Debug)]
+// pub struct Slice {
+//     inner: ffi::MDB_val,
+// }
 
-impl Slice {
-    pub unsafe fn inner(&self) -> &[u8] {
-        slice::from_raw_parts(self.inner.mv_data as *const u8, self.inner.mv_size as usize)
-    }
-}
+// impl Slice {
+//     pub unsafe fn inner(&self) -> &[u8] {
+//         slice::from_raw_parts(self.inner.mv_data as *const u8, self.inner.mv_size as usize)
+//     }
+// }
 
-impl AsRef<[u8]> for Slice {
-    fn as_ref(&self) -> &[u8] {
-        unsafe { self.inner() }
-    }
-}
+// impl AsRef<[u8]> for Slice {
+//     fn as_ref(&self) -> &[u8] {
+//         unsafe { self.inner() }
+//     }
+// }
 
-impl Deref for Slice {
-    type Target = [u8];
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.inner() }
-    }
-}
+// impl Deref for Slice {
+//     type Target = [u8];
+//     fn deref(&self) -> &Self::Target {
+//         unsafe { self.inner() }
+//     }
+// }
 
 struct Dbi {
     inner: ffi::MDB_dbi,
@@ -102,13 +100,13 @@ unsafe impl Sync for Tree {}
 
 impl Tree {}
 
-struct Txn {
-    _db: Option<Arc<DbInner>>,
+pub struct Txn<'env> {
     inner: *mut ffi::MDB_txn,
+    _marker: PhantomData<&'env Db>,
 }
 
-impl Txn {
-    fn new_ro(db: &DbInner, _db: Option<Arc<DbInner>>) -> Result<Self> {
+impl<'env> Txn<'env> {
+    fn new_ro(db: &'env DbInner) -> Result<Self> {
         let mut txn: *mut ffi::MDB_txn = ptr::null_mut();
         unsafe {
             lmdb_result(ffi::mdb_txn_begin(
@@ -118,104 +116,116 @@ impl Txn {
                 &mut txn,
             ))?;
         }
-        Ok(Self { inner: txn, _db })
+        Ok(Self {
+            inner: txn,
+            _marker: PhantomData,
+        })
     }
 
-    fn new_rw(db: &DbInner, _db: Option<Arc<DbInner>>) -> Result<Self> {
+    fn new_rw(db: &'env DbInner) -> Result<Self> {
         let mut txn: *mut ffi::MDB_txn = ptr::null_mut();
         unsafe {
             lmdb_result(ffi::mdb_txn_begin(db.inner, ptr::null_mut(), 0, &mut txn))?;
         }
-        Ok(Self { inner: txn, _db })
+        Ok(Self {
+            inner: txn,
+            _marker: PhantomData,
+        })
     }
 
-    fn commit(self) -> Result<()> {
+    pub fn commit(self) -> Result<()> {
         unsafe {
             let result = lmdb_result(ffi::mdb_txn_commit(self.inner));
             mem::forget(self);
             result
         }
     }
+
+    pub fn get<'txn, K: AsRef<[u8]>>(
+        &'txn self,
+        tree: &Tree,
+        key: K,
+    ) -> Result<Option<&'txn [u8]>> {
+        let key = key.as_ref();
+        let mut key_val = ffi::MDB_val {
+            mv_size: key.len() as size_t,
+            mv_data: key.as_ptr() as *mut c_void,
+        };
+
+        let mut data_val = ffi::MDB_val {
+            mv_size: 0,
+            mv_data: ptr::null_mut(),
+        };
+        unsafe {
+            match ffi::mdb_get(self.inner, tree.inner, &mut key_val, &mut data_val) {
+                ffi::MDB_SUCCESS => Ok(Some(val_to_slice(data_val))),
+                ffi::MDB_NOTFOUND => Ok(None),
+                err_code => Err(lmdb_error(err_code)),
+            }
+        }
+    }
+
+    pub fn iter_from<'txn, K: AsRef<[u8]>>(
+        &'txn self,
+        tree: &Tree,
+        from: Bound<K>,
+        rev: bool,
+    ) -> Iter<'txn> {
+        let mut iter = Iter::new(&self, tree);
+        iter.seek(from, rev);
+        iter
+    }
+
+    pub fn iter(&self, tree: &Tree) -> Iter {
+        self.iter_from(tree, Bound::Unbounded::<Vec<u8>>, false)
+    }
 }
 
-impl Drop for Txn {
+impl<'env> Drop for Txn<'env> {
     fn drop(&mut self) {
         unsafe { ffi::mdb_txn_abort(self.inner) }
     }
 }
 
-pub struct Reader {
-    txn: Rc<Txn>,
+pub struct Reader<'env> {
+    txn: Txn<'env>,
 }
 
-impl Reader {
-    fn new(db: &Arc<DbInner>) -> Result<Self> {
-        // let txn = Txn::new_ro(db, Some(Arc::clone(db)))?;
-        let txn = Txn::new_ro(db, None)?;
-        Ok(Self { txn: Rc::new(txn) })
-    }
-
-    pub fn get<K: AsRef<[u8]>>(&self, tree: &Tree, key: K) -> Result<Option<Slice>> {
-        get_in_txn(self.txn.inner, tree, key)
-    }
-
-    pub fn iter_from<K: AsRef<[u8]>>(&self, tree: &Tree, from: Bound<K>, rev: bool) -> Iter {
-        let mut iter = Iter::new(Rc::clone(&self.txn), tree);
-        iter.seek(from, rev);
-        iter
-    }
-
-    pub fn iter(&self, tree: &Tree) -> Iter {
-        self.iter_from(tree, Bound::Unbounded::<Vec<u8>>, false)
+impl<'env> Deref for Reader<'env> {
+    type Target = Txn<'env>;
+    fn deref(&self) -> &Self::Target {
+        &self.txn
     }
 }
 
-pub struct Writer {
-    txn: Rc<Txn>,
-}
+impl<'env> Reader<'env> {
+    fn new(db: &'env DbInner) -> Result<Self> {
+        Ok(Self {
+            txn: Txn::new_ro(db)?,
+        })
+    }
 
-fn get_in_txn<K: AsRef<[u8]>>(
-    txn: *mut ffi::MDB_txn,
-    tree: &Tree,
-    key: K,
-) -> Result<Option<Slice>> {
-    let key = key.as_ref();
-    let mut key_val = ffi::MDB_val {
-        mv_size: key.len() as size_t,
-        mv_data: key.as_ptr() as *mut c_void,
-    };
-
-    let mut data_val = ffi::MDB_val {
-        mv_size: 0,
-        mv_data: ptr::null_mut(),
-    };
-    unsafe {
-        match ffi::mdb_get(txn, tree.inner, &mut key_val, &mut data_val) {
-            ffi::MDB_SUCCESS => Ok(Some(Slice { inner: data_val })),
-            ffi::MDB_NOTFOUND => Ok(None),
-            err_code => Err(lmdb_error(err_code)),
-        }
+    pub fn commit(self) -> Result<()> {
+        self.txn.commit()
     }
 }
 
-impl Writer {
-    fn new(db: &Arc<DbInner>) -> Result<Self> {
-        let txn = Txn::new_rw(db, Some(Arc::clone(db)))?;
-        Ok(Self { txn: Rc::new(txn) })
-    }
+pub struct Writer<'env> {
+    txn: Txn<'env>,
+}
 
-    pub fn get<K: AsRef<[u8]>>(&self, tree: &Tree, key: K) -> Result<Option<Slice>> {
-        get_in_txn(self.txn.inner, tree, key)
+impl<'env> Deref for Writer<'env> {
+    type Target = Txn<'env>;
+    fn deref(&self) -> &Self::Target {
+        &self.txn
     }
+}
 
-    pub fn iter_from<K: AsRef<[u8]>>(&self, tree: &Tree, from: Bound<K>, rev: bool) -> Iter {
-        let mut iter = Iter::new(Rc::clone(&self.txn), tree);
-        iter.seek(from, rev);
-        iter
-    }
-
-    pub fn iter(&self, tree: &Tree) -> Iter {
-        self.iter_from(tree, Bound::Unbounded::<Vec<u8>>, false)
+impl<'env> Writer<'env> {
+    fn new(db: &'env DbInner) -> Result<Self> {
+        Ok(Self {
+            txn: Txn::new_rw(db)?,
+        })
     }
 
     pub fn put<K, V>(&mut self, tree: &Tree, key: K, value: V) -> Result<()>
@@ -275,10 +285,7 @@ impl Writer {
     }
 
     pub fn commit(self) -> Result<()> {
-        match Rc::try_unwrap(self.txn) {
-            Ok(txn) => txn.commit(),
-            Err(_) => Err(Error::Commit),
-        }
+        self.txn.commit()
     }
 }
 
@@ -375,7 +382,7 @@ impl DbInner {
         }
 
         // create
-        let writer = Txn::new_rw(self, None)?;
+        let writer = Txn::new_rw(self)?;
         let flags = ffi::MDB_CREATE | flags;
 
         let dbi = Dbi::new(writer.inner, name, flags)?;
@@ -388,7 +395,7 @@ impl DbInner {
     fn drop_tree(&self, name: Option<&str>) -> Result<bool> {
         // let sname = name.to_string();
         if let Some(dbi) = self.dbs.write().remove(&name.map(|s| s.to_owned())) {
-            let writer = Txn::new_rw(self, None)?;
+            let writer = Txn::new_rw(self)?;
             unsafe {
                 lmdb_result(ffi::mdb_drop(writer.inner, dbi.inner, 1))?;
             }
@@ -408,7 +415,7 @@ unsafe impl Send for Db {}
 unsafe impl Sync for Db {}
 
 impl Db {
-    pub fn writer(&self) -> Result<Writer> {
+    pub fn writer<'env>(&'env self) -> Result<Writer<'env>> {
         Writer::new(&self.inner)
     }
 
@@ -435,7 +442,7 @@ impl Db {
         })
     }
 
-    pub fn reader(&self) -> std::result::Result<Reader, Error> {
+    pub fn reader<'env>(&'env self) -> Result<Reader<'env>> {
         Reader::new(&self.inner)
     }
 
@@ -447,20 +454,20 @@ impl Db {
     }
 }
 
-pub struct Iter {
+pub struct Iter<'txn> {
     err: Option<Error>,
-    inner: Option<InnerIter>,
+    inner: Option<IterInner<'txn>>,
     rev: bool,
     op: c_uint,
     next_op: c_uint,
     dup: bool,
 }
 
-impl Iter {
-    fn new(txn: Rc<Txn>, tree: &Tree) -> Self {
+impl<'txn> Iter<'txn> {
+    fn new(txn: &'txn Txn, tree: &Tree) -> Self {
         let dup = tree.flags & ffi::MDB_DUPSORT == ffi::MDB_DUPSORT;
 
-        let inner = InnerIter::new(txn, tree.inner);
+        let inner = IterInner::new(txn, tree.inner);
         match inner {
             Err(err) => Self {
                 err: Some(err),
@@ -482,7 +489,7 @@ impl Iter {
     }
 }
 
-impl Iter {
+impl<'txn> Iter<'txn> {
     pub fn seek<K: AsRef<[u8]>>(&mut self, from: Bound<K>, rev: bool) {
         self.rev = rev;
         if let Some(ref mut inner) = self.inner {
@@ -513,6 +520,7 @@ impl Iter {
                             }
                             Err(err) => {
                                 self.err = Some(err);
+                                self.inner = None;
                             }
                         }
                     }
@@ -534,6 +542,7 @@ impl Iter {
                             }
                             Err(err) => {
                                 self.err = Some(err);
+                                self.inner = None;
                             }
                         }
                     }
@@ -549,6 +558,7 @@ impl Iter {
                         match inner.get_by_key(start.as_ref(), ffi::MDB_SET_RANGE) {
                             Err(err) => {
                                 self.err = Some(err);
+                                self.inner = None;
                             }
                             _ => {}
                         }
@@ -568,6 +578,7 @@ impl Iter {
                             Ok(None) => {}
                             Err(err) => {
                                 self.err = Some(err);
+                                self.inner = None;
                             }
                         }
                     }
@@ -580,15 +591,16 @@ impl Iter {
     }
 }
 
-impl Iterator for Iter {
-    type Item = Result<(Slice, Slice), Error>;
+impl<'txn> Iterator for Iter<'txn> {
+    type Item = Result<(&'txn [u8], &'txn [u8]), Error>;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(err) = &self.err {
-            Some(Err(err.clone()))
-        } else if let Some(ref mut inner) = self.inner {
-            let item = inner.get(self.op);
-            self.op = self.next_op;
+        if let Some(ref mut inner) = self.inner {
+            let op = mem::replace(&mut self.op, self.next_op);
+            let item = inner.get(op);
+            // self.op = self.next_op;
             item.transpose()
+        } else if let Some(err) = &self.err {
+            Some(Err(err.clone()))
         } else {
             None
         }
@@ -624,28 +636,30 @@ fn lmdb_result(err_code: c_int) -> Result<()> {
 //     }
 // }
 
-// unsafe fn val_to_slice<'a>(val: ffi::MDB_val) -> &'a [u8] {
-//     slice::from_raw_parts(val.mv_data as *const u8, val.mv_size as usize)
-// }
+unsafe fn val_to_slice<'a>(val: ffi::MDB_val) -> &'a [u8] {
+    slice::from_raw_parts(val.mv_data as *const u8, val.mv_size as usize)
+}
 
-/// copy from [`lmdb::Cursor`]
-struct InnerIter {
-    _txn: Rc<Txn>,
+struct IterInner<'txn> {
+    _marker: PhantomData<&'txn ()>,
     cursor: *mut ffi::MDB_cursor,
 }
 
-type InnerItem = Result<Option<(Slice, Slice)>, Error>;
+type Item<'a> = Result<Option<(&'a [u8], &'a [u8])>>;
 
-impl InnerIter {
-    fn new(_txn: Rc<Txn>, dbi: ffi::MDB_dbi) -> Result<Self, Error> {
+impl<'txn> IterInner<'txn> {
+    fn new(txn: &'txn Txn, dbi: ffi::MDB_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDB_cursor = ptr::null_mut();
         unsafe {
-            lmdb_result(ffi::mdb_cursor_open(_txn.inner, dbi, &mut cursor))?;
+            lmdb_result(ffi::mdb_cursor_open(txn.inner, dbi, &mut cursor))?;
         }
-        Ok(Self { cursor, _txn })
+        Ok(Self {
+            cursor,
+            _marker: PhantomData,
+        })
     }
 
-    fn get_by_key(&mut self, key: &[u8], op: c_uint) -> InnerItem {
+    fn get_by_key(&mut self, key: &[u8], op: c_uint) -> Item<'txn> {
         let key = ffi::MDB_val {
             mv_size: key.len() as size_t,
             mv_data: key.as_ptr() as *mut c_void,
@@ -653,18 +667,14 @@ impl InnerIter {
         self.get_by_mdb_key(key, op)
     }
 
-    fn get_by_mdb_key(&mut self, mut key: ffi::MDB_val, op: c_uint) -> InnerItem {
+    fn get_by_mdb_key(&mut self, mut key: ffi::MDB_val, op: c_uint) -> Item<'txn> {
         let mut data = ffi::MDB_val {
             mv_size: 0,
             mv_data: ptr::null_mut(),
         };
         unsafe {
             match ffi::mdb_cursor_get(self.cursor, &mut key, &mut data, op) {
-                ffi::MDB_SUCCESS => {
-                    let k = Slice { inner: key };
-                    let v = Slice { inner: data };
-                    Ok(Some((k, v)))
-                }
+                ffi::MDB_SUCCESS => Ok(Some((val_to_slice(key), val_to_slice(data)))),
                 // EINVAL can occur when the cursor was previously seeked to a non-existent value,
                 // e.g. iter_from with a key greater than all values in the database.
                 ffi::MDB_NOTFOUND | EINVAL => Ok(None),
@@ -673,7 +683,7 @@ impl InnerIter {
         }
     }
 
-    fn get(&mut self, op: c_uint) -> InnerItem {
+    fn get(&mut self, op: c_uint) -> Item<'txn> {
         let key = ffi::MDB_val {
             mv_size: 0,
             mv_data: ptr::null_mut(),
@@ -682,7 +692,7 @@ impl InnerIter {
     }
 }
 
-impl Drop for InnerIter {
+impl<'txn> Drop for IterInner<'txn> {
     fn drop(&mut self) {
         unsafe {
             ffi::mdb_cursor_close(self.cursor);

@@ -4,7 +4,7 @@ use nokv_bench::*;
 use std::time::{Duration, Instant};
 
 fn bench_put_get1(c: &mut Criterion) {
-    bench_put_get(c, 3_000_000, 10_000);
+    bench_put_get(c, 1_000_000, 10_000);
 }
 
 fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
@@ -51,9 +51,10 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         group.bench_function("lmdb-all", |b| {
             b.iter(|| {
                 let mut iter = reader.iter(&tree);
+                black_box(&iter);
                 while let Some(kv) = iter.next() {
                     let kv = kv.unwrap();
-                    black_box(kv);
+                    black_box((kv.0.as_ref(), kv.1.as_ref()));
                 }
             })
         });
@@ -94,6 +95,7 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
             b.iter(|| {
                 let mut cursor = ro.open_ro_cursor(db).unwrap();
                 let mut iter = cursor.iter_start();
+                black_box(&iter);
                 while let Some(kv) = iter.next() {
                     let kv = kv.unwrap();
                     black_box(kv);
@@ -125,7 +127,7 @@ fn bench_create(c: &mut Criterion) {
             b.iter(|| {
                 let reader = db.reader().unwrap();
                 let iter = reader.iter_from(&tree, std::ops::Bound::Included("key"), false);
-                black_box(iter)
+                black_box(iter);
             })
         });
     }

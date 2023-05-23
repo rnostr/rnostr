@@ -18,9 +18,11 @@ pub fn test_txn() -> Result<()> {
     {
         let mut writer = db.writer()?;
         writer.put(&t1, b"k1", b"v1")?;
-        let _iter = writer.iter(&t1);
+        {
+            let _iter = writer.iter(&t1);
+        }
         let c = writer.commit();
-        assert!(c.is_err());
+        assert!(c.is_ok());
     }
 
     {
