@@ -21,3 +21,7 @@ tempfile = "3.5.0"
 [[bench]]
 name = "iter"
 harness = false
+
+[[bench]]
+name = "scanner"
+harness = false
