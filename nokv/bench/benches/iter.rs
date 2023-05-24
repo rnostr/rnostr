@@ -24,7 +24,7 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
 
     {
         let dir = tempfile::Builder::new()
-            .prefix("nokv-bench-create-lmdb")
+            .prefix("nokv-bench-put-get-lmdb")
             .tempdir()
             .unwrap();
         let db =
@@ -53,8 +53,7 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                 let mut iter = reader.iter(&tree);
                 black_box(&iter);
                 while let Some(kv) = iter.next() {
-                    let kv = kv.unwrap();
-                    black_box((kv.0.as_ref(), kv.1.as_ref()));
+                    black_box(kv.unwrap());
                 }
             })
         });
@@ -62,7 +61,7 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
 
     {
         let dir = tempfile::Builder::new()
-            .prefix("nokv-bench-create-lmdb-rkv")
+            .prefix("nokv-bench-put-get-lmdb-rkv")
             .tempdir()
             .unwrap();
         let env = lmdb::Environment::new()
@@ -97,8 +96,7 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                 let mut iter = cursor.iter_start();
                 black_box(&iter);
                 while let Some(kv) = iter.next() {
-                    let kv = kv.unwrap();
-                    black_box(kv);
+                    black_box(kv.unwrap());
                 }
             })
         });
