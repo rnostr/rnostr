@@ -28,9 +28,14 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
             .prefix("nokv-bench-put-get-lmdb")
             .tempdir()
             .unwrap();
-        let db =
-            nokv::lmdb::Db::open_with(dir.path(), Some(30), Some(1_000), Some(1_000_000_000_000))
-                .unwrap();
+        let db = nokv::lmdb::Db::open_with(
+            dir.path(),
+            Some(30),
+            Some(1_000),
+            Some(1_000_000_000_000),
+            0,
+        )
+        .unwrap();
         let tree = db.open_tree(Some("t1"), 0).unwrap();
 
         println!("lmdb: Put initial data batch {}", chunk_size);
@@ -118,9 +123,14 @@ fn bench_create(c: &mut Criterion) {
             .prefix("nokv-bench-create-lmdb")
             .tempdir()
             .unwrap();
-        let db =
-            nokv::lmdb::Db::open_with(dir.path(), Some(30), Some(1_000), Some(1_000_000_000_000))
-                .unwrap();
+        let db = nokv::lmdb::Db::open_with(
+            dir.path(),
+            Some(30),
+            Some(1_000),
+            Some(1_000_000_000_000),
+            0,
+        )
+        .unwrap();
         let tree = db.open_tree(None, 0).unwrap();
         group.bench_function("lmdb", |b| {
             b.iter(|| {

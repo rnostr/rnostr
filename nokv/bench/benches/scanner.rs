@@ -25,8 +25,14 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         .prefix("nokv-bench-scanner")
         .tempdir()
         .unwrap();
-    let db = nokv::lmdb::Db::open_with(dir.path(), Some(30), Some(1_000), Some(1_000_000_000_000))
-        .unwrap();
+    let db = nokv::lmdb::Db::open_with(
+        dir.path(),
+        Some(30),
+        Some(1_000),
+        Some(1_000_000_000_000),
+        0,
+    )
+    .unwrap();
     let tree = db.open_tree(Some("t1"), 0).unwrap();
 
     {

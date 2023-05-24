@@ -256,7 +256,10 @@ impl DbInner {
         maxdbs: Option<u32>,
         maxreaders: Option<u32>,
         mapsize: Option<usize>,
+        flag: u32,
     ) -> Result<Self> {
+        // let flag = ffi::MDB_NOTLS;
+
         let path = path.as_ref();
         let c_path = to_cpath(path)?;
 
@@ -267,8 +270,6 @@ impl DbInner {
         }
 
         let mut env: *mut ffi::MDB_env = ptr::null_mut();
-        // let flag = ffi::MDB_NOTLS;
-        let flag = 0;
         unsafe {
             lmdb_try!(ffi::mdb_env_create(&mut env));
 
@@ -374,7 +375,7 @@ impl Db {
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Self::open_with(path, Some(20), Some(100), Some(1_000_000_000_000))
+        Self::open_with(path, Some(20), Some(100), Some(1_000_000_000_000), 0)
     }
 
     pub fn open_with<P: AsRef<Path>>(
@@ -382,9 +383,10 @@ impl Db {
         maxdbs: Option<u32>,
         maxreaders: Option<u32>,
         mapsize: Option<usize>,
+        flags: u32,
     ) -> Result<Self> {
         Ok(Self {
-            inner: Arc::new(DbInner::open(path, maxdbs, maxreaders, mapsize)?),
+            inner: Arc::new(DbInner::open(path, maxdbs, maxreaders, mapsize, flags)?),
         })
     }
 
