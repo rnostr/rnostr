@@ -1,6 +1,6 @@
 use anyhow::Result;
 use nokv::{
-    lmdb::{ffi, Db},
+    lmdb::{ffi, Db, Transaction},
     scanner::*,
     Error,
 };

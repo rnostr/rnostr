@@ -1,5 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use lmdb::{Cursor, Transaction};
+use nokv::lmdb::Transaction as Txn;
 use nokv_bench::*;
 use std::time::{Duration, Instant};
 

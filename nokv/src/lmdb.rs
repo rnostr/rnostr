@@ -67,15 +67,72 @@ pub struct Tree {
 unsafe impl Send for Tree {}
 unsafe impl Sync for Tree {}
 
-impl Tree {}
+pub trait Transaction: Sized {
+    fn txn(&self) -> *mut ffi::MDB_txn;
 
-pub struct Txn<'env> {
+    fn commit(self) -> Result<()> {
+        unsafe {
+            let result = lmdb_result(ffi::mdb_txn_commit(self.txn()));
+            mem::forget(self);
+            result
+        }
+    }
+
+    fn get<'txn, K: AsRef<[u8]>>(&'txn self, tree: &Tree, key: K) -> Result<Option<&'txn [u8]>> {
+        let key = key.as_ref();
+        let mut key_val = ffi::MDB_val {
+            mv_size: key.len() as size_t,
+            mv_data: key.as_ptr() as *mut c_void,
+        };
+
+        let mut data_val = ffi::MDB_val {
+            mv_size: 0,
+            mv_data: ptr::null_mut(),
+        };
+        unsafe {
+            match ffi::mdb_get(self.txn(), tree.inner, &mut key_val, &mut data_val) {
+                ffi::MDB_SUCCESS => Ok(Some(val_to_slice(data_val))),
+                ffi::MDB_NOTFOUND => Ok(None),
+                err_code => Err(lmdb_error(err_code)),
+            }
+        }
+    }
+
+    fn iter_from<'txn, K: AsRef<[u8]>>(
+        &'txn self,
+        tree: &Tree,
+        from: Bound<K>,
+        rev: bool,
+    ) -> Iter<'txn> {
+        let mut iter = Iter::new(self, tree);
+        iter.seek(from, rev);
+        iter
+    }
+
+    fn iter(&self, tree: &Tree) -> Iter {
+        self.iter_from(tree, Bound::Unbounded::<Vec<u8>>, false)
+    }
+}
+
+pub struct Reader<'env> {
     inner: *mut ffi::MDB_txn,
     _marker: PhantomData<&'env Db>,
 }
 
-impl<'env> Txn<'env> {
-    fn new_ro(db: &'env DbInner) -> Result<Self> {
+impl<'env> Drop for Reader<'env> {
+    fn drop(&mut self) {
+        unsafe { ffi::mdb_txn_abort(self.inner) }
+    }
+}
+
+impl<'env> Transaction for Reader<'env> {
+    fn txn(&self) -> *mut ffi::MDB_txn {
+        self.inner
+    }
+}
+
+impl<'env> Reader<'env> {
+    fn new(db: &'env DbInner) -> Result<Self> {
         let mut txn: *mut ffi::MDB_txn = ptr::null_mut();
         unsafe {
             lmdb_result(ffi::mdb_txn_begin(
@@ -90,8 +147,27 @@ impl<'env> Txn<'env> {
             _marker: PhantomData,
         })
     }
+}
 
-    fn new_rw(db: &'env DbInner) -> Result<Self> {
+pub struct Writer<'env> {
+    inner: *mut ffi::MDB_txn,
+    _marker: PhantomData<&'env Db>,
+}
+
+impl<'env> Drop for Writer<'env> {
+    fn drop(&mut self) {
+        unsafe { ffi::mdb_txn_abort(self.inner) }
+    }
+}
+
+impl<'env> Transaction for Writer<'env> {
+    fn txn(&self) -> *mut ffi::MDB_txn {
+        self.inner
+    }
+}
+
+impl<'env> Writer<'env> {
+    fn new(db: &'env DbInner) -> Result<Self> {
         let mut txn: *mut ffi::MDB_txn = ptr::null_mut();
         unsafe {
             lmdb_result(ffi::mdb_txn_begin(db.inner, ptr::null_mut(), 0, &mut txn))?;
@@ -99,101 +175,6 @@ impl<'env> Txn<'env> {
         Ok(Self {
             inner: txn,
             _marker: PhantomData,
-        })
-    }
-
-    pub fn commit(self) -> Result<()> {
-        unsafe {
-            let result = lmdb_result(ffi::mdb_txn_commit(self.inner));
-            mem::forget(self);
-            result
-        }
-    }
-
-    pub fn get<'txn, K: AsRef<[u8]>>(
-        &'txn self,
-        tree: &Tree,
-        key: K,
-    ) -> Result<Option<&'txn [u8]>> {
-        let key = key.as_ref();
-        let mut key_val = ffi::MDB_val {
-            mv_size: key.len() as size_t,
-            mv_data: key.as_ptr() as *mut c_void,
-        };
-
-        let mut data_val = ffi::MDB_val {
-            mv_size: 0,
-            mv_data: ptr::null_mut(),
-        };
-        unsafe {
-            match ffi::mdb_get(self.inner, tree.inner, &mut key_val, &mut data_val) {
-                ffi::MDB_SUCCESS => Ok(Some(val_to_slice(data_val))),
-                ffi::MDB_NOTFOUND => Ok(None),
-                err_code => Err(lmdb_error(err_code)),
-            }
-        }
-    }
-
-    pub fn iter_from<'txn, K: AsRef<[u8]>>(
-        &'txn self,
-        tree: &Tree,
-        from: Bound<K>,
-        rev: bool,
-    ) -> Iter<'txn> {
-        let mut iter = Iter::new(&self, tree);
-        iter.seek(from, rev);
-        iter
-    }
-
-    pub fn iter(&self, tree: &Tree) -> Iter {
-        self.iter_from(tree, Bound::Unbounded::<Vec<u8>>, false)
-    }
-}
-
-impl<'env> Drop for Txn<'env> {
-    fn drop(&mut self) {
-        unsafe { ffi::mdb_txn_abort(self.inner) }
-    }
-}
-
-pub struct Reader<'env> {
-    txn: Txn<'env>,
-}
-
-impl<'env> Deref for Reader<'env> {
-    type Target = Txn<'env>;
-    fn deref(&self) -> &Self::Target {
-        &self.txn
-    }
-}
-
-impl<'env> Reader<'env> {
-    fn new(db: &'env DbInner) -> Result<Self> {
-        Ok(Self {
-            txn: Txn::new_ro(db)?,
-        })
-    }
-
-    pub fn commit(self) -> Result<()> {
-        self.txn.commit()
-    }
-}
-
-pub struct Writer<'env> {
-    txn: Txn<'env>,
-}
-
-impl<'env> Deref for Writer<'env> {
-    type Target = Txn<'env>;
-    fn deref(&self) -> &Self::Target {
-        &self.txn
-    }
-}
-
-impl<'env> Writer<'env> {
-    fn new(db: &'env DbInner) -> Result<Self> {
-        Ok(Self {
-            txn: Txn::new_rw(db)?,
         })
     }
 
@@ -216,7 +197,7 @@ impl<'env> Writer<'env> {
         };
         unsafe {
             lmdb_result(ffi::mdb_put(
-                self.txn.inner,
+                self.inner,
                 tree.inner,
                 &mut key_val,
                 &mut data_val,
@@ -238,23 +219,19 @@ impl<'env> Writer<'env> {
                 mv_data: value.as_ptr() as *mut c_void,
             };
             unsafe {
-                match ffi::mdb_del(self.txn.inner, tree.inner, &mut key_val, &mut data_val) {
+                match ffi::mdb_del(self.inner, tree.inner, &mut key_val, &mut data_val) {
                     ffi::MDB_SUCCESS | ffi::MDB_NOTFOUND => Ok(()),
                     err_code => Err(lmdb_error(err_code)),
                 }
             }
         } else {
             unsafe {
-                match ffi::mdb_del(self.txn.inner, tree.inner, &mut key_val, ptr::null_mut()) {
+                match ffi::mdb_del(self.inner, tree.inner, &mut key_val, ptr::null_mut()) {
                     ffi::MDB_SUCCESS | ffi::MDB_NOTFOUND => Ok(()),
                     err_code => Err(lmdb_error(err_code)),
                 }
             }
         }
-    }
-
-    pub fn commit(self) -> Result<()> {
-        self.txn.commit()
     }
 }
 
@@ -351,7 +328,7 @@ impl DbInner {
         }
 
         // create
-        let writer = Txn::new_rw(self)?;
+        let writer = Writer::new(self)?;
         let flags = ffi::MDB_CREATE | flags;
 
         let dbi = Dbi::new(writer.inner, name, flags)?;
@@ -362,9 +339,8 @@ impl DbInner {
     }
 
     fn drop_tree(&self, name: Option<&str>) -> Result<bool> {
-        // let sname = name.to_string();
-        if let Some(dbi) = self.dbs.write().remove(&name.map(|s| s.to_owned())) {
-            let writer = Txn::new_rw(self)?;
+        if let Some(dbi) = self.dbs.write().remove(&name.map(ToOwned::to_owned)) {
+            let writer = Writer::new(self)?;
             unsafe {
                 lmdb_result(ffi::mdb_drop(writer.inner, dbi.inner, 1))?;
             }
@@ -376,6 +352,7 @@ impl DbInner {
     }
 }
 
+#[derive(Clone)]
 pub struct Db {
     inner: Arc<DbInner>,
 }
@@ -433,7 +410,7 @@ pub struct Iter<'txn> {
 }
 
 impl<'txn> Iter<'txn> {
-    fn new(txn: &'txn Txn, tree: &Tree) -> Self {
+    fn new<T: Transaction>(txn: &'txn T, tree: &Tree) -> Self {
         let dup = tree.flags & ffi::MDB_DUPSORT == ffi::MDB_DUPSORT;
 
         let inner = IterInner::new(txn, tree.inner);
@@ -604,10 +581,10 @@ struct IterInner<'txn> {
 type Item<'a> = Result<Option<(&'a [u8], &'a [u8])>>;
 
 impl<'txn> IterInner<'txn> {
-    fn new(txn: &'txn Txn, dbi: ffi::MDB_dbi) -> Result<Self> {
+    fn new<T: Transaction>(txn: &'txn T, dbi: ffi::MDB_dbi) -> Result<Self> {
         let mut cursor: *mut ffi::MDB_cursor = ptr::null_mut();
         unsafe {
-            lmdb_result(ffi::mdb_cursor_open(txn.inner, dbi, &mut cursor))?;
+            lmdb_result(ffi::mdb_cursor_open(txn.txn(), dbi, &mut cursor))?;
         }
         Ok(Self {
             cursor,
