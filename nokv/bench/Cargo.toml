@@ -16,7 +16,7 @@ criterion = "0.4.0"
 lmdb-rkv = "0.14.0"
 nokv = { path = "../"}
 tempfile = "3.5.0"
-
+thiserror = "1.0.40"
 
 [[bench]]
 name = "iter"
