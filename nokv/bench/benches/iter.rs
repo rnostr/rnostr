@@ -17,9 +17,9 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
     let initial_chunks = chunk_vec(&initial, chunk_size);
 
     let mut group = c.benchmark_group(format!("put-get-{}-{}", num_str, chunk_size));
-    group.measurement_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
     group.sample_size(50);
-    group.warm_up_time(Duration::from_millis(100));
+    group.warm_up_time(Duration::from_secs(1));
     group.throughput(Throughput::Elements(init_len as u64));
 
     {
