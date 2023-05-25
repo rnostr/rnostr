@@ -6,69 +6,42 @@ use nokv_bench::*;
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
-struct Key {
-    uid: Vec<u8>,
-    kind: u64,
+struct Key<'txn> {
+    // k: &'txn [u8],
     time: u64,
-}
-
-impl Key {
-    fn encode(kind: u64, time: u64) -> Vec<u8> {
-        [&kind.to_be_bytes()[..], &time.to_be_bytes()[..]].concat()
-    }
-
-    fn from(key: &[u8], val: &[u8]) -> Self {
-        let time = u64::from_be_bytes(key[8..16].try_into().unwrap());
-        let kind = u64::from_be_bytes(key[0..8].try_into().unwrap());
-        Self {
-            time,
-            uid: val.to_vec(),
-            kind,
-        }
-    }
-}
-
-impl TimeKey for Key {
-    fn time(&self) -> u64 {
-        self.time
-    }
-
-    fn uid(&self) -> &[u8] {
-        &self.uid
-    }
-
-    fn change_time(&self, time: u64) -> Vec<u8> {
-        Self::encode(self.kind, time)
-    }
-}
-
-#[derive(Debug)]
-struct ZeroKey<'txn> {
-    k: &'txn [u8],
     v: &'txn [u8],
 }
 
-impl<'txn> ZeroKey<'txn> {
+impl<'txn> Key<'txn> {
     fn encode(kind: u64, time: u64) -> Vec<u8> {
         [&kind.to_be_bytes()[..], &time.to_be_bytes()[..]].concat()
     }
 
     fn from(k: &'txn [u8], v: &'txn [u8]) -> Self {
-        Self { k, v }
-    }
-}
-
-impl<'txn> TimeKey for ZeroKey<'txn> {
-    fn time(&self) -> u64 {
-        u64::from_be_bytes(self.k[8..16].try_into().unwrap())
+        Self {
+            time: u64::from_be_bytes(k[8..16].try_into().unwrap()),
+            v,
+        }
     }
 
     fn uid(&self) -> &[u8] {
         self.v
     }
+}
 
-    fn change_time(&self, time: u64) -> Vec<u8> {
-        [&self.k[0..8], &time.to_be_bytes()[..]].concat()
+impl<'txn> TimeKey for Key<'txn> {
+    fn time(&self) -> u64 {
+        self.time
+    }
+
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.time()
+            .cmp(&other.time())
+            .then_with(|| self.uid().cmp(other.uid()))
+    }
+
+    fn change_time(&self, key: &[u8], time: u64) -> Vec<u8> {
+        [&key[0..8], &time.to_be_bytes()[..]].concat()
     }
 }
 
@@ -133,52 +106,77 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
             b.iter(|| {
                 let mut iter = reader.iter(&tree);
                 black_box(&iter);
-                let mut _total = 0;
+                let mut total = 0;
                 while let Some(kv) = iter.next() {
                     let kv = kv.unwrap();
-                    // black_box(kv);
-                    black_box(ZeroKey::from(kv.0, kv.1));
-                    // black_box(Key::from(kv.0, kv.1));
-                    _total += 1;
+                    total += 1;
                 }
+                black_box(total);
             })
         });
     }
+
     {
         let reader = db.reader().unwrap();
-
         group.bench_function("scanner-count", |b| {
             b.iter(|| {
                 let iter = reader.iter(&tree);
-                let mut group = Group::new(false, false);
                 let prefix = vec![];
-                let scanner = Scanner::<_, MyError>::new(
+                let mut scanner = Scanner::<_, MyError>::new(
                     iter,
                     prefix.clone(),
                     prefix.clone(),
                     false,
                     None,
                     None,
-                    Box::new(|s, (k, v)| {
-                        Ok(MatchResult::Found(ZeroKey::from(k, v)))
-                        // Ok(MatchResult::Found(Key::from(k, v)))
-                        // Ok(if k.starts_with(&s.prefix) {
-                        //     MatchResult::Found(Key::from(k, v))
-                        // } else {
-                        //     MatchResult::Stop
-                        // })
-                    }),
+                    Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
                 );
-                group.add(prefix.clone(), scanner).unwrap();
-                let mut _total = 0;
-                while let Some(kv) = group.next() {
+                let mut total = 0;
+                while let Some(kv) = scanner.next() {
                     let kv = kv.unwrap();
-                    black_box(kv);
-                    _total += 1;
+                    // black_box(kv);
+                    total += 1;
                 }
+                black_box(total);
             });
         });
     }
+
+    // {
+    //     let reader = db.reader().unwrap();
+
+    //     group.bench_function("scanner-count", |b| {
+    //         b.iter(|| {
+    //             let iter = reader.iter(&tree);
+    //             let mut group = Group::new(false, false);
+    //             let prefix = vec![];
+    //             let scanner = Scanner::<_, MyError>::new(
+    //                 iter,
+    //                 prefix.clone(),
+    //                 prefix.clone(),
+    //                 false,
+    //                 None,
+    //                 None,
+    //                 Box::new(|s, (k, v)| {
+    //                     Ok(MatchResult::Found(ZeroKey::from(k, v)))
+    //                     // Ok(MatchResult::Found(Key::from(k, v)))
+    //                     // Ok(if k.starts_with(&s.prefix) {
+    //                     //     MatchResult::Found(Key::from(k, v))
+    //                     // } else {
+    //                     //     MatchResult::Stop
+    //                     // })
+    //                 }),
+    //             );
+    //             group.add(prefix.clone(), scanner).unwrap();
+    //             let mut _total = 0;
+    //             while let Some(kv) = group.next() {
+    //                 let kv = kv.unwrap();
+    //                 black_box(kv);
+    //                 _total += 1;
+    //             }
+    //         });
+    //     });
+    // }
     group.finish();
 }
 

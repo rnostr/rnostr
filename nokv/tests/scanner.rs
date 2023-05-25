@@ -30,6 +30,10 @@ impl<'txn> Key<'txn> {
         //     kind,
         // }
     }
+    fn uid(&self) -> &[u8] {
+        self.v
+        // &self.uid
+    }
 }
 
 impl<'txn> TimeKey for Key<'txn> {
@@ -38,13 +42,14 @@ impl<'txn> TimeKey for Key<'txn> {
         // self.time
     }
 
-    fn uid(&self) -> &[u8] {
-        self.v
-        // &self.uid
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.time()
+            .cmp(&other.time())
+            .then_with(|| self.uid().cmp(other.uid()))
     }
 
-    fn change_time(&self, time: u64) -> Vec<u8> {
-        [&self.k[0..8], &time.to_be_bytes()[..]].concat()
+    fn change_time(&self, key: &[u8], time: u64) -> Vec<u8> {
+        [&key[0..8], &time.to_be_bytes()[..]].concat()
         // Self::encode(self.kind, time)
     }
 }

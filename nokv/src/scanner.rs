@@ -9,16 +9,15 @@ use std::{
 pub trait TimeKey {
     fn time(&self) -> u64;
 
-    fn uid(&self) -> &[u8];
+    // fn uid(&self) -> &[u8];
 
-    fn cmp_time_uid(&self, other: &Self) -> Ordering {
-        self.time()
-            .cmp(&other.time())
-            .then_with(|| self.uid().cmp(other.uid()))
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.time().cmp(&other.time())
+        // .then_with(|| self.uid().cmp(other.uid()))
     }
 
     /// change the key time for scan next
-    fn change_time(&self, time: u64) -> Vec<u8>;
+    fn change_time(&self, key: &[u8], time: u64) -> Vec<u8>;
 }
 
 /// sort key list by time
@@ -41,9 +40,9 @@ impl<I: TimeKey> SortedKeyList<I> {
         //TODO: we can custom search from bigger index because the incoming data is closer to the left
         let insert_at = match self.inner.binary_search_by(|p| {
             if self.reverse {
-                p.1.cmp_time_uid(&key)
+                p.1.cmp(&key)
             } else {
-                key.cmp_time_uid(&p.1)
+                key.cmp(&p.1)
             }
         }) {
             Ok(insert_at) | Err(insert_at) => insert_at,
@@ -130,7 +129,7 @@ where
                 let len = self.founds.len();
                 for i in (0..len).into_iter().rev() {
                     let item = &self.founds[i];
-                    if item.1.cmp_time_uid(key).is_ne() {
+                    if item.1.cmp(key).is_ne() {
                         let scanner = self.scanners.get_mut(&cur.0).unwrap();
                         self.scan_index += 1;
                         if let Some(item) = scanner.next() {
@@ -163,7 +162,7 @@ where
             // dedup
             while self.founds.len() > 0 {
                 let item = &self.founds[self.founds.len() - 1];
-                if item.1.cmp_time_uid(&curs[0].1).is_eq() {
+                if item.1.cmp(&curs[0].1).is_eq() {
                     curs.push(self.founds.pop().unwrap());
                 } else {
                     break;
@@ -202,6 +201,40 @@ where
             return None;
         }
         self.next_inner().transpose()
+    }
+}
+
+pub struct OneGroup<'txn, K, E>
+where
+    K: TimeKey,
+    E: From<Error>,
+{
+    pub scanner: Scanner<'txn, K, E>,
+    pub scan_index: u64,
+}
+
+impl<'txn, K, E> OneGroup<'txn, K, E>
+where
+    K: TimeKey,
+    E: From<Error>,
+{
+    pub fn new(scanner: Scanner<'txn, K, E>) -> Self {
+        OneGroup {
+            scanner,
+            scan_index: 0,
+        }
+    }
+}
+
+impl<'txn, K, E> Iterator for OneGroup<'txn, K, E>
+where
+    K: TimeKey,
+    E: From<Error>,
+{
+    type Item = Result<K, E>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.scan_index += 1;
+        self.scanner.next()
     }
 }
 
@@ -265,6 +298,7 @@ where
             self.times += 1;
             if let Some(item) = self.inner.next() {
                 let item = item?;
+                let item_key = item.0;
                 match (self.matcher)(self, item)? {
                     MatchResult::Continue => {
                         continue;
@@ -275,39 +309,45 @@ where
                     }
 
                     MatchResult::Found(key) => {
-                        let time = key.time();
                         // check time
                         if self.reverse {
                             if let Some(util) = self.until {
-                                if time > util {
+                                if key.time() > util {
                                     // go to the range start match time
-                                    self.inner
-                                        .seek(Bound::Included(key.change_time(util)), true);
+                                    self.inner.seek(
+                                        Bound::Included(key.change_time(item_key, util)),
+                                        true,
+                                    );
                                     continue;
                                 }
                             }
 
                             if let Some(since) = self.since {
                                 // go to the next range match prefix
-                                if time < since {
-                                    self.inner.seek(Bound::Excluded(key.change_time(0)), true);
+                                if key.time() < since {
+                                    self.inner
+                                        .seek(Bound::Excluded(key.change_time(item_key, 0)), true);
                                     continue;
                                 }
                             }
                         } else {
                             if let Some(since) = self.since {
-                                if time < since {
+                                if key.time() < since {
                                     // go to the range start match time
-                                    self.inner
-                                        .seek(Bound::Included(key.change_time(since)), false);
+                                    self.inner.seek(
+                                        Bound::Included(key.change_time(item_key, since)),
+                                        false,
+                                    );
                                     continue;
                                 }
                             }
                             if let Some(util) = self.until {
-                                if time > util {
+                                if key.time() > util {
                                     // go to the next range match prefix
-                                    self.inner
-                                        .seek(Bound::Excluded(key.change_time(u64::MAX)), false);
+                                    self.inner.seek(
+                                        Bound::Excluded(key.change_time(item_key, u64::MAX)),
+                                        false,
+                                    );
                                     continue;
                                 }
                             }
@@ -341,13 +381,12 @@ mod tests {
     #[test]
     fn sorted_key_list() -> Result<()> {
         struct Key {
-            uid: Vec<u8>,
             time: u64,
         }
 
         impl Key {
-            fn new(uid: Vec<u8>, time: u64) -> Self {
-                Self { uid, time }
+            fn new(time: u64) -> Self {
+                Self { time }
             }
         }
 
@@ -355,20 +394,18 @@ mod tests {
             fn time(&self) -> u64 {
                 self.time
             }
-            fn uid(&self) -> &[u8] {
-                &self.uid
-            }
-            fn change_time(&self, _time: u64) -> Vec<u8> {
+
+            fn change_time(&self, _key: &[u8], _time: u64) -> Vec<u8> {
                 vec![]
             }
         }
 
         // reverse
         let mut sl = SortedKeyList::new(true);
-        sl.add(vec![1], Key::new(vec![1u8], 1));
-        sl.add(vec![10], Key::new(vec![1u8], 10));
-        sl.add(vec![5], Key::new(vec![1u8], 5));
-        sl.add(vec![6], Key::new(vec![1u8], 6));
+        sl.add(vec![1], Key::new(1));
+        sl.add(vec![10], Key::new(10));
+        sl.add(vec![5], Key::new(5));
+        sl.add(vec![6], Key::new(6));
 
         assert_eq!(sl.len(), 4);
         assert_eq!(sl.pop().map(|a| a.0), Some(vec![10]));
@@ -376,10 +413,10 @@ mod tests {
         assert_eq!(sl.len(), 2);
 
         let mut sl = SortedKeyList::new(false);
-        sl.add(vec![1], Key::new(vec![1u8], 1));
-        sl.add(vec![10], Key::new(vec![1u8], 10));
-        sl.add(vec![5], Key::new(vec![1u8], 5));
-        sl.add(vec![6], Key::new(vec![1u8], 6));
+        sl.add(vec![1], Key::new(1));
+        sl.add(vec![10], Key::new(10));
+        sl.add(vec![5], Key::new(5));
+        sl.add(vec![6], Key::new(6));
 
         assert_eq!(sl.len(), 4);
         assert_eq!(sl.pop().map(|a| a.0), Some(vec![1]));
