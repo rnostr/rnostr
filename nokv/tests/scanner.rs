@@ -113,7 +113,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(prefix.clone(), scanner)?;
+        group.add(i as u32, scanner)?;
     }
 
     let k = group.next().unwrap()?;
@@ -152,7 +152,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(prefix.clone(), scanner)?;
+        group.add(i as u32, scanner)?;
     }
 
     let k = group.next().unwrap()?;

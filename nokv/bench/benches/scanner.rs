@@ -6,30 +6,32 @@ use nokv_bench::*;
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
-struct Key<'txn> {
+struct Key {
     // k: &'txn [u8],
+    // v: &'txn [u8],
     time: u64,
-    v: &'txn [u8],
+    id: u64,
 }
 
-impl<'txn> Key<'txn> {
+impl Key {
     fn encode(kind: u64, time: u64) -> Vec<u8> {
         [&kind.to_be_bytes()[..], &time.to_be_bytes()[..]].concat()
     }
 
-    fn from(k: &'txn [u8], v: &'txn [u8]) -> Self {
+    fn from(k: &[u8], v: &[u8]) -> Self {
         Self {
             time: u64::from_be_bytes(k[8..16].try_into().unwrap()),
-            v,
+            id: u64::from_be_bytes(v[0..8].try_into().unwrap()),
+            // v,
         }
     }
 
-    fn uid(&self) -> &[u8] {
-        self.v
+    fn uid(&self) -> u64 {
+        self.id
     }
 }
 
-impl<'txn> TimeKey for Key<'txn> {
+impl TimeKey for Key {
     fn time(&self) -> u64 {
         self.time
     }
@@ -37,7 +39,7 @@ impl<'txn> TimeKey for Key<'txn> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.time()
             .cmp(&other.time())
-            .then_with(|| self.uid().cmp(other.uid()))
+            .then_with(|| self.uid().cmp(&other.uid()))
     }
 
     fn change_time(&self, key: &[u8], time: u64) -> Vec<u8> {
@@ -69,6 +71,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
     group.sample_size(50);
     group.warm_up_time(Duration::from_secs(1));
     group.throughput(Throughput::Elements(init_len as u64));
+    // group.throughput(Throughput::Elements(1));
     let dir = tempfile::Builder::new()
         .prefix("nokv-bench-scanner")
         .tempdir()
@@ -100,21 +103,21 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         );
     }
 
-    {
-        let reader = db.reader().unwrap();
-        group.bench_function("count", |b| {
-            b.iter(|| {
-                let mut iter = reader.iter(&tree);
-                black_box(&iter);
-                let mut total = 0;
-                while let Some(kv) = iter.next() {
-                    let kv = kv.unwrap();
-                    total += 1;
-                }
-                black_box(total);
-            })
-        });
-    }
+    // {
+    //     let reader = db.reader().unwrap();
+    //     group.bench_function("count", |b| {
+    //         b.iter(|| {
+    //             let mut iter = reader.iter(&tree);
+    //             black_box(&iter);
+    //             let mut total = 0;
+    //             while let Some(kv) = iter.next() {
+    //                 let kv = kv.unwrap();
+    //                 total += 1;
+    //             }
+    //             black_box(total);
+    //         })
+    //     });
+    // }
 
     {
         let reader = db.reader().unwrap();
@@ -142,41 +145,33 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         });
     }
 
-    // {
-    //     let reader = db.reader().unwrap();
+    {
+        let reader = db.reader().unwrap();
 
-    //     group.bench_function("scanner-count", |b| {
-    //         b.iter(|| {
-    //             let iter = reader.iter(&tree);
-    //             let mut group = Group::new(false, false);
-    //             let prefix = vec![];
-    //             let scanner = Scanner::<_, MyError>::new(
-    //                 iter,
-    //                 prefix.clone(),
-    //                 prefix.clone(),
-    //                 false,
-    //                 None,
-    //                 None,
-    //                 Box::new(|s, (k, v)| {
-    //                     Ok(MatchResult::Found(ZeroKey::from(k, v)))
-    //                     // Ok(MatchResult::Found(Key::from(k, v)))
-    //                     // Ok(if k.starts_with(&s.prefix) {
-    //                     //     MatchResult::Found(Key::from(k, v))
-    //                     // } else {
-    //                     //     MatchResult::Stop
-    //                     // })
-    //                 }),
-    //             );
-    //             group.add(prefix.clone(), scanner).unwrap();
-    //             let mut _total = 0;
-    //             while let Some(kv) = group.next() {
-    //                 let kv = kv.unwrap();
-    //                 black_box(kv);
-    //                 _total += 1;
-    //             }
-    //         });
-    //     });
-    // }
+        group.bench_function("group-count", |b| {
+            b.iter(|| {
+                let iter = reader.iter(&tree);
+                let mut group = Group::new(false, false);
+                let prefix = vec![];
+                let scanner = Scanner::<_, MyError>::new(
+                    iter,
+                    prefix.clone(),
+                    prefix.clone(),
+                    false,
+                    None,
+                    None,
+                    Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
+                );
+                group.add(0, scanner).unwrap();
+                let mut _total = 0;
+                while let Some(kv) = group.next() {
+                    let kv = kv.unwrap();
+                    black_box(kv);
+                    _total += 1;
+                }
+            });
+        });
+    }
     group.finish();
 }
 

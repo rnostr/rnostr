@@ -68,14 +68,14 @@ impl<I, K> DerefMut for SortedKeyList<I, K> {
 type GroupItem<K, E> = Result<K, E>;
 /// Query in a group of scanners in a given time sequence.
 /// Get the scanners intersection if and.
-
+type ShortItemType = u32;
 pub struct Group<'txn, K, E>
 where
     K: TimeKey,
     E: From<Error>,
 {
-    pub scanners: HashMap<Vec<u8>, Scanner<'txn, K, E>>,
-    founds: SortedKeyList<Vec<u8>, K>,
+    pub scanners: HashMap<ShortItemType, Scanner<'txn, K, E>>,
+    founds: SortedKeyList<ShortItemType, K>,
     pub scan_index: u64,
     and: bool,
     done: bool,
@@ -96,7 +96,7 @@ where
         }
     }
 
-    pub fn add(&mut self, key: Vec<u8>, scanner: Scanner<'txn, K, E>) -> Result<(), E> {
+    pub fn add(&mut self, key: ShortItemType, scanner: Scanner<'txn, K, E>) -> Result<(), E> {
         if self.scanners.contains_key(&key) {
             return Ok(());
         }
