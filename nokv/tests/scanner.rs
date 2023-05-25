@@ -116,19 +116,19 @@ pub fn test_scanner() -> Result<()> {
         group.add(prefix.clone(), scanner)?;
     }
 
-    let k = group.next().unwrap()?.1;
+    let k = group.next().unwrap()?;
     assert_eq!(k.time(), 10);
     assert_eq!(k.uid(), 1u64.to_be_bytes());
 
-    let k = group.next().unwrap()?.1;
+    let k = group.next().unwrap()?;
     assert_eq!(k.time(), 10);
     assert_eq!(k.uid(), 2u64.to_be_bytes());
 
-    let k = group.next().unwrap()?.1;
+    let k = group.next().unwrap()?;
     assert_eq!(k.time(), 10);
     assert_eq!(k.uid(), 3u64.to_be_bytes());
 
-    let k = group.next().unwrap()?.1;
+    let k = group.next().unwrap()?;
     assert_eq!(k.time(), 20);
     assert_eq!(k.uid(), 6u64.to_be_bytes());
 
@@ -155,7 +155,7 @@ pub fn test_scanner() -> Result<()> {
         group.add(prefix.clone(), scanner)?;
     }
 
-    let k = group.next().unwrap()?.1;
+    let k = group.next().unwrap()?;
     assert_eq!(k.uid(), 3u64.to_be_bytes());
     assert!(group.next().is_none());
 

@@ -22,12 +22,12 @@ pub trait TimeKey {
 
 /// sort key list by time
 #[derive(Default, Debug)]
-pub struct SortedKeyList<I> {
-    inner: Vec<(Vec<u8>, I)>,
+pub struct SortedKeyList<I, K> {
+    inner: Vec<(I, K)>,
     reverse: bool,
 }
 
-impl<I: TimeKey> SortedKeyList<I> {
+impl<I, K: TimeKey> SortedKeyList<I, K> {
     pub fn new(reverse: bool) -> Self {
         Self {
             inner: Vec::new(),
@@ -35,7 +35,7 @@ impl<I: TimeKey> SortedKeyList<I> {
         }
     }
 
-    pub fn add(&mut self, prefix: Vec<u8>, key: I) {
+    pub fn add(&mut self, item: I, key: K) {
         // binary search from middle
         //TODO: we can custom search from bigger index because the incoming data is closer to the left
         let insert_at = match self.inner.binary_search_by(|p| {
@@ -47,25 +47,25 @@ impl<I: TimeKey> SortedKeyList<I> {
         }) {
             Ok(insert_at) | Err(insert_at) => insert_at,
         };
-        self.inner.insert(insert_at, (prefix, key));
+        self.inner.insert(insert_at, (item, key));
     }
 }
 
-impl<I> Deref for SortedKeyList<I> {
-    type Target = Vec<(Vec<u8>, I)>;
+impl<I, K> Deref for SortedKeyList<I, K> {
+    type Target = Vec<(I, K)>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<I> DerefMut for SortedKeyList<I> {
+impl<I, K> DerefMut for SortedKeyList<I, K> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
 }
 
-type GroupItem<K, E> = Result<(Vec<u8>, K), E>;
+type GroupItem<K, E> = Result<K, E>;
 /// Query in a group of scanners in a given time sequence.
 /// Get the scanners intersection if and.
 
@@ -75,9 +75,10 @@ where
     E: From<Error>,
 {
     pub scanners: HashMap<Vec<u8>, Scanner<'txn, K, E>>,
-    founds: SortedKeyList<K>,
+    founds: SortedKeyList<Vec<u8>, K>,
     pub scan_index: u64,
     and: bool,
+    done: bool,
 }
 
 impl<'txn, K, E> Group<'txn, K, E>
@@ -91,6 +92,7 @@ where
             founds: SortedKeyList::new(reverse),
             scan_index: 0,
             and,
+            done: false,
         }
     }
 
@@ -111,6 +113,7 @@ where
         if let Some(item) = scanner.next() {
             self.founds.add(key.clone(), item?);
         } else if self.and {
+            self.done = true;
             self.founds.clear();
             return Ok(());
         }
@@ -119,7 +122,7 @@ where
         Ok(())
     }
 
-    fn next_inner(&mut self) -> Result<Option<(Vec<u8>, K)>, E> {
+    fn next_inner(&mut self) -> Result<Option<K>, E> {
         // check empty in iterator next, so we can use unwrap
         if self.and {
             'go: loop {
@@ -133,7 +136,7 @@ where
                         let scanner = self.scanners.get_mut(&cur.0).unwrap();
                         self.scan_index += 1;
                         if let Some(item) = scanner.next() {
-                            self.founds.add(cur.0.clone(), item?);
+                            self.founds.add(cur.0, item?);
                             continue 'go;
                         } else {
                             // One scanner is out of data, stop
@@ -147,13 +150,13 @@ where
                 let scanner = self.scanners.get_mut(&cur.0).unwrap();
                 self.scan_index += 1;
                 if let Some(item) = scanner.next() {
-                    self.founds.add(cur.0.clone(), item?);
+                    self.founds.add(cur.0, item?);
                 } else {
                     // One scanner is out of data, stop
                     self.founds.clear();
                 }
                 // all eq
-                return Ok(Some(cur));
+                return Ok(Some(cur.1));
             }
         } else {
             // or
@@ -169,25 +172,27 @@ where
                 }
             }
 
-            // scan next
-            for cur in curs.iter() {
+            let cur = curs.pop().unwrap();
+
+            // scan dup next
+            for cur in curs {
                 let scanner = self.scanners.get_mut(&cur.0).unwrap();
                 self.scan_index += 1;
                 if let Some(item) = scanner.next() {
-                    self.founds.add(cur.0.clone(), item?);
+                    self.founds.add(cur.0, item?);
                 }
             }
 
-            Ok(Some(curs.pop().unwrap()))
+            // next
+            let scanner = self.scanners.get_mut(&cur.0).unwrap();
+            self.scan_index += 1;
+            if let Some(item) = scanner.next() {
+                self.founds.add(cur.0, item?);
+            }
+
+            Ok(Some(cur.1))
         }
     }
-
-    // pub fn next(&mut self) -> Option<Result<(&Scanner<I, K>, K), Error<I::Error>>> {
-    //     if self.founds.is_empty() {
-    //         return None;
-    //     }
-    //     Some(self.next_inner())
-    // }
 }
 
 impl<'txn, K, E> Iterator for Group<'txn, K, E>
@@ -197,7 +202,7 @@ where
 {
     type Item = GroupItem<K, E>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.founds.is_empty() {
+        if self.founds.is_empty() || self.done {
             return None;
         }
         self.next_inner().transpose()
