@@ -101,7 +101,7 @@ where
             return Ok(());
         }
 
-        if self.and && !self.scanners.is_empty() && self.founds.is_empty() {
+        if self.done {
             // empty down
             return Ok(());
         }
