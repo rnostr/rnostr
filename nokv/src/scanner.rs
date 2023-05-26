@@ -19,7 +19,8 @@ pub trait TimeKey {
     fn change_time(&self, key: &[u8], time: u64) -> Vec<u8>;
 }
 
-/// sort key list by time
+/// sort key list by time, smaller ones in the back
+/// bigger in the back if reverse
 #[derive(Default, Debug)]
 pub struct SortedKeyList<I, K> {
     inner: Vec<(I, K)>,
@@ -34,16 +35,26 @@ impl<I, K: TimeKey> SortedKeyList<I, K> {
         }
     }
 
+    fn cmp(&self, k1: &K, k2: &K) -> Ordering {
+        if self.reverse {
+            k1.cmp(k2)
+        } else {
+            k2.cmp(k1)
+        }
+    }
+
     pub fn add(&mut self, item: I, key: K) {
-        // binary search from middle
-        //TODO: we can custom search from bigger index because the incoming data is closer to the left
-        let insert_at = match self.inner.binary_search_by(|p| {
-            if self.reverse {
-                p.1.cmp(&key)
-            } else {
-                key.cmp(&p.1)
-            }
-        }) {
+        // binary
+        // TODO: custom search from bigger index because the incoming data is closer to the left
+        // let len = self.inner.len();
+        // if len > 0 {
+        //     // 4 2 1
+        //     if self.cmp(&self.inner[len - 1].1, &key).is_le() {
+        //         self.inner.push((item, key));
+        //         return;
+        //     }
+        // }
+        let insert_at = match self.inner.binary_search_by(|p| self.cmp(&p.1, &key)) {
             Ok(insert_at) | Err(insert_at) => insert_at,
         };
         self.inner.insert(insert_at, (item, key));
