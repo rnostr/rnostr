@@ -89,7 +89,7 @@ where
     E: From<Error>,
 {
     pub fn new(reverse: bool, and: bool, dup: bool) -> Self {
-        Group {
+        Self {
             onlyone: None,
             scanners: Vec::new(),
             founds: SortedKeyList::new(reverse),
@@ -141,85 +141,85 @@ where
         Ok(())
     }
 
-    fn next_inner(&mut self) -> Result<Option<K>, E> {
+    fn next_and(&mut self) -> Result<Option<K>, E> {
         // check empty in iterator next, so we can use unwrap
-        if self.and {
-            'go: loop {
-                let cur = self.founds.pop().unwrap();
-                let key = &cur.1;
-                // scanners intersection
-                let len = self.founds.len();
-                for i in (0..len).into_iter().rev() {
-                    let item = &self.founds[i];
-                    if item.1.cmp(key).is_ne() {
-                        let scanner = self.scanners.get_mut(cur.0).unwrap();
-                        let item = scanner.next();
-                        self.scan_index += scanner.cur_times;
-                        if let Some(item) = item {
-                            self.founds.add(cur.0, item?);
-                            continue 'go;
-                        } else {
-                            // One scanner is out of data, stop
-                            self.founds.clear();
-                            return Ok(None);
-                        }
-                    }
-                }
-
-                // scan next
-                let scanner = self.scanners.get_mut(cur.0).unwrap();
-                let item = scanner.next();
-                self.scan_index += scanner.cur_times;
-                if let Some(item) = item {
-                    self.founds.add(cur.0, item?);
-                } else {
-                    // One scanner is out of data, stop
-                    self.founds.clear();
-                }
-                // all eq
-                return Ok(Some(cur.1));
-            }
-        } else {
-            // or
-            let cur;
-            if self.dup {
-                let mut curs = vec![self.founds.pop().unwrap()];
-
-                // dedup
-                while self.founds.len() > 0 {
-                    let item = &self.founds[self.founds.len() - 1];
-                    if item.1.cmp(&curs[0].1).is_eq() {
-                        curs.push(self.founds.pop().unwrap());
-                    } else {
-                        break;
-                    }
-                }
-
-                cur = curs.pop().unwrap();
-
-                // scan dup next
-                for cur in curs {
+        'go: loop {
+            let cur = self.founds.pop().unwrap();
+            let key = &cur.1;
+            // scanners intersection
+            let len = self.founds.len();
+            for i in (0..len).into_iter().rev() {
+                let item = &self.founds[i];
+                if item.1.cmp(key).is_ne() {
                     let scanner = self.scanners.get_mut(cur.0).unwrap();
                     let item = scanner.next();
                     self.scan_index += scanner.cur_times;
                     if let Some(item) = item {
                         self.founds.add(cur.0, item?);
+                        continue 'go;
+                    } else {
+                        // One scanner is out of data, stop
+                        self.founds.clear();
+                        return Ok(None);
                     }
                 }
-            } else {
-                cur = self.founds.pop().unwrap();
             }
 
-            // next
+            // scan next
             let scanner = self.scanners.get_mut(cur.0).unwrap();
             let item = scanner.next();
             self.scan_index += scanner.cur_times;
             if let Some(item) = item {
                 self.founds.add(cur.0, item?);
+            } else {
+                // One scanner is out of data, stop
+                self.founds.clear();
+            }
+            // all eq
+            return Ok(Some(cur.1));
+        }
+    }
+
+    fn next_or(&mut self) -> Result<Option<K>, E> {
+        // or
+        let cur;
+        if self.dup {
+            let mut curs = vec![self.founds.pop().unwrap()];
+
+            // dedup
+            while self.founds.len() > 0 {
+                let item = &self.founds[self.founds.len() - 1];
+                if item.1.cmp(&curs[0].1).is_eq() {
+                    curs.push(self.founds.pop().unwrap());
+                } else {
+                    break;
+                }
             }
 
-            Ok(Some(cur.1))
+            cur = curs.pop().unwrap();
+
+            // scan dup next
+            for cur in curs {
+                let scanner = self.scanners.get_mut(cur.0).unwrap();
+                let item = scanner.next();
+                self.scan_index += scanner.cur_times;
+                if let Some(item) = item {
+                    self.founds.add(cur.0, item?);
+                }
+            }
+        } else {
+            cur = self.founds.pop().unwrap();
         }
+
+        // next
+        let scanner = self.scanners.get_mut(cur.0).unwrap();
+        let item = scanner.next();
+        self.scan_index += scanner.cur_times;
+        if let Some(item) = item {
+            self.founds.add(cur.0, item?);
+        }
+
+        Ok(Some(cur.1))
     }
 }
 
@@ -238,43 +238,30 @@ where
             if self.founds.is_empty() || self.done {
                 return None;
             }
-            self.next_inner().transpose()
+            if self.and {
+                self.next_and().transpose()
+            } else {
+                self.next_or().transpose()
+            }
         }
     }
 }
 
-pub struct OneGroup<'txn, K, E>
+pub enum GroupType<'txn, K, E>
 where
     K: TimeKey,
     E: From<Error>,
 {
-    pub scanner: Scanner<'txn, K, E>,
-    pub scan_index: u64,
-}
-
-impl<'txn, K, E> OneGroup<'txn, K, E>
-where
-    K: TimeKey,
-    E: From<Error>,
-{
-    pub fn new(scanner: Scanner<'txn, K, E>) -> Self {
-        OneGroup {
-            scanner,
-            scan_index: 0,
-        }
-    }
-}
-
-impl<'txn, K, E> Iterator for OneGroup<'txn, K, E>
-where
-    K: TimeKey,
-    E: From<Error>,
-{
-    type Item = Result<K, E>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.scan_index += 1;
-        self.scanner.next()
-    }
+    One(Scanner<'txn, K, E>),
+    // scanners,
+    // sortedlist,
+    // dup: one id has more than one key
+    Or(
+        Vec<Scanner<'txn, K, E>>,
+        SortedKeyList<ShortItemType, K>,
+        bool,
+    ),
+    And(Vec<Scanner<'txn, K, E>>, SortedKeyList<ShortItemType, K>),
 }
 
 type ScannerMatcher<'txn, K, E> =

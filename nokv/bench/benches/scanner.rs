@@ -135,60 +135,32 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         });
     }
 
-    {
-        let reader = db.reader().unwrap();
-        group.bench_function("scanner-count", |b| {
-            b.iter(|| {
-                let iter = reader.iter(&tree);
-                let prefix = vec![];
-                let mut scanner = Scanner::<_, MyError>::new(
-                    iter,
-                    prefix.clone(),
-                    prefix.clone(),
-                    false,
-                    None,
-                    None,
-                    Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
-                );
-                let mut total = 0;
-                while let Some(kv) = scanner.next() {
-                    let kv = kv.unwrap();
-                    // black_box(kv);
-                    total += 1;
-                }
-                assert_eq!(total, init_len);
-                black_box(total);
-            });
-        });
-    }
-
-    {
-        let reader = db.reader().unwrap();
-        group.bench_function("one-group-count", |b| {
-            b.iter(|| {
-                let iter = reader.iter(&tree);
-                let prefix = vec![];
-                let mut scanner = Scanner::<_, MyError>::new(
-                    iter,
-                    prefix.clone(),
-                    prefix.clone(),
-                    false,
-                    None,
-                    None,
-                    Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
-                );
-                let mut total = 0;
-                let mut group = OneGroup::new(scanner);
-                while let Some(kv) = group.next() {
-                    let kv = kv.unwrap();
-                    // black_box(kv);
-                    total += 1;
-                }
-                assert_eq!(total, init_len);
-                black_box(total);
-            });
-        });
-    }
+    // {
+    //     let reader = db.reader().unwrap();
+    //     group.bench_function("scanner-count", |b| {
+    //         b.iter(|| {
+    //             let iter = reader.iter(&tree);
+    //             let prefix = vec![];
+    //             let mut scanner = Scanner::<_, MyError>::new(
+    //                 iter,
+    //                 prefix.clone(),
+    //                 prefix.clone(),
+    //                 false,
+    //                 None,
+    //                 None,
+    //                 Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
+    //             );
+    //             let mut total = 0;
+    //             while let Some(kv) = scanner.next() {
+    //                 let kv = kv.unwrap();
+    //                 // black_box(kv);
+    //                 total += 1;
+    //             }
+    //             assert_eq!(total, init_len);
+    //             black_box(total);
+    //         });
+    //     });
+    // }
 
     {
         let reader = db.reader().unwrap();
@@ -211,10 +183,11 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                 let mut total = 0;
                 while let Some(kv) = group.next() {
                     let kv = kv.unwrap();
-                    black_box(kv);
+                    // black_box(kv);
                     total += 1;
                 }
                 assert_eq!(total, init_len);
+                black_box(total);
             });
         });
     }
