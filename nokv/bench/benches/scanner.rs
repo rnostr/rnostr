@@ -196,7 +196,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         group.bench_function("group-one-scanner-count", |b| {
             b.iter(|| {
                 let iter = reader.iter(&tree);
-                let mut group = Group::new(false, false);
+                let mut group = Group::new(false, false, false);
                 let prefix = vec![];
                 let scanner = Scanner::<_, MyError>::new(
                     iter,
@@ -207,7 +207,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                     None,
                     Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
                 );
-                group.add(0, scanner).unwrap();
+                group.add(scanner).unwrap();
                 let mut total = 0;
                 while let Some(kv) = group.next() {
                     let kv = kv.unwrap();
@@ -224,7 +224,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
 
         group.bench_function("group-count", |b| {
             b.iter(|| {
-                let mut group = Group::new(false, false);
+                let mut group = Group::new(false, false, false);
                 (0..total_kind).for_each(|i| {
                     let prefix = i.to_be_bytes().to_vec();
                     let iter = reader.iter_from(&tree, Bound::Included(&prefix), false);
@@ -243,7 +243,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                             }
                         }),
                     );
-                    group.add(i as u32, scanner).unwrap();
+                    group.add(scanner).unwrap();
                 });
 
                 let mut total = 0;

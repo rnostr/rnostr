@@ -94,7 +94,7 @@ pub fn test_scanner() -> Result<()> {
     let reader = db.reader()?;
 
     // or
-    let mut group = Group::new(false, false);
+    let mut group = Group::new(false, false, true);
     for i in 1u64..4 {
         let prefix = i.to_be_bytes().to_vec();
         let iter = reader.iter_from(&tree, Bound::Included(&prefix), false);
@@ -113,7 +113,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(i as u32, scanner)?;
+        group.add(scanner)?;
     }
 
     let k = group.next().unwrap()?;
@@ -133,7 +133,7 @@ pub fn test_scanner() -> Result<()> {
     assert_eq!(k.uid(), 6u64.to_be_bytes());
 
     // and
-    let mut group = Group::new(false, true);
+    let mut group = Group::new(false, true, true);
     for i in 1u64..3 {
         let prefix = i.to_be_bytes().to_vec();
         let iter = reader.iter_from(&tree, Bound::Included(&prefix), false);
@@ -152,7 +152,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(i as u32, scanner)?;
+        group.add(scanner)?;
     }
 
     let k = group.next().unwrap()?;

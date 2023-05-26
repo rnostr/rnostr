@@ -1,7 +1,6 @@
 use crate::{lmdb::Iter, Error};
 use std::{
     cmp::Ordering,
-    collections::HashMap,
     ops::{Bound, Deref, DerefMut},
 };
 
@@ -68,17 +67,20 @@ impl<I, K> DerefMut for SortedKeyList<I, K> {
 type GroupItem<K, E> = Result<K, E>;
 /// Query in a group of scanners in a given time sequence.
 /// Get the scanners intersection if and.
-type ShortItemType = u32;
+type ShortItemType = usize;
 pub struct Group<'txn, K, E>
 where
     K: TimeKey,
     E: From<Error>,
 {
-    pub scanners: HashMap<ShortItemType, Scanner<'txn, K, E>>,
+    onlyone: Option<Scanner<'txn, K, E>>,
+    scanners: Vec<Scanner<'txn, K, E>>,
     founds: SortedKeyList<ShortItemType, K>,
     pub scan_index: u64,
     and: bool,
     done: bool,
+    // one id has more than one key
+    dup: bool,
 }
 
 impl<'txn, K, E> Group<'txn, K, E>
@@ -86,39 +88,56 @@ where
     K: TimeKey,
     E: From<Error>,
 {
-    pub fn new(reverse: bool, and: bool) -> Self {
+    pub fn new(reverse: bool, and: bool, dup: bool) -> Self {
         Group {
-            scanners: HashMap::new(),
+            onlyone: None,
+            scanners: Vec::new(),
             founds: SortedKeyList::new(reverse),
             scan_index: 0,
             and,
             done: false,
+            dup,
         }
     }
 
-    pub fn add(&mut self, key: ShortItemType, scanner: Scanner<'txn, K, E>) -> Result<(), E> {
-        if self.scanners.contains_key(&key) {
-            return Ok(());
-        }
-
+    pub fn add(&mut self, scanner: Scanner<'txn, K, E>) -> Result<(), E> {
         if self.done {
-            // empty down
+            return Ok(());
+        }
+        // only one
+        if self.scanners.is_empty() && self.onlyone.is_none() {
+            self.onlyone = Some(scanner);
+        } else {
+            if self.onlyone.is_some() {
+                let s = self.onlyone.take().unwrap();
+                self.add_to_list(s)?;
+            }
+            self.add_to_list(scanner)?;
+        }
+        Ok(())
+    }
+
+    fn add_to_list(&mut self, mut scanner: Scanner<'txn, K, E>) -> Result<(), E> {
+        if self.done {
             return Ok(());
         }
 
-        self.scanners.insert(key.clone(), scanner);
-        let scanner = self.scanners.get_mut(&key).unwrap();
-        let start = scanner.times;
+        let key = self.scanners.len();
+
+        let item = scanner.next();
+        self.scan_index += scanner.cur_times;
+
         // get the first
-        if let Some(item) = scanner.next() {
-            self.founds.add(key.clone(), item?);
+        if let Some(item) = item {
+            self.founds.add(key, item?);
         } else if self.and {
             self.done = true;
             self.founds.clear();
             return Ok(());
         }
 
-        self.scan_index += scanner.times - start;
+        self.scanners.push(scanner);
+
         Ok(())
     }
 
@@ -133,9 +152,10 @@ where
                 for i in (0..len).into_iter().rev() {
                     let item = &self.founds[i];
                     if item.1.cmp(key).is_ne() {
-                        let scanner = self.scanners.get_mut(&cur.0).unwrap();
-                        self.scan_index += 1;
-                        if let Some(item) = scanner.next() {
+                        let scanner = self.scanners.get_mut(cur.0).unwrap();
+                        let item = scanner.next();
+                        self.scan_index += scanner.cur_times;
+                        if let Some(item) = item {
                             self.founds.add(cur.0, item?);
                             continue 'go;
                         } else {
@@ -147,9 +167,10 @@ where
                 }
 
                 // scan next
-                let scanner = self.scanners.get_mut(&cur.0).unwrap();
-                self.scan_index += 1;
-                if let Some(item) = scanner.next() {
+                let scanner = self.scanners.get_mut(cur.0).unwrap();
+                let item = scanner.next();
+                self.scan_index += scanner.cur_times;
+                if let Some(item) = item {
                     self.founds.add(cur.0, item?);
                 } else {
                     // One scanner is out of data, stop
@@ -160,33 +181,40 @@ where
             }
         } else {
             // or
-            let mut curs = vec![self.founds.pop().unwrap()];
+            let cur;
+            if self.dup {
+                let mut curs = vec![self.founds.pop().unwrap()];
 
-            // dedup
-            while self.founds.len() > 0 {
-                let item = &self.founds[self.founds.len() - 1];
-                if item.1.cmp(&curs[0].1).is_eq() {
-                    curs.push(self.founds.pop().unwrap());
-                } else {
-                    break;
+                // dedup
+                while self.founds.len() > 0 {
+                    let item = &self.founds[self.founds.len() - 1];
+                    if item.1.cmp(&curs[0].1).is_eq() {
+                        curs.push(self.founds.pop().unwrap());
+                    } else {
+                        break;
+                    }
                 }
-            }
 
-            let cur = curs.pop().unwrap();
+                cur = curs.pop().unwrap();
 
-            // scan dup next
-            for cur in curs {
-                let scanner = self.scanners.get_mut(&cur.0).unwrap();
-                self.scan_index += 1;
-                if let Some(item) = scanner.next() {
-                    self.founds.add(cur.0, item?);
+                // scan dup next
+                for cur in curs {
+                    let scanner = self.scanners.get_mut(cur.0).unwrap();
+                    let item = scanner.next();
+                    self.scan_index += scanner.cur_times;
+                    if let Some(item) = item {
+                        self.founds.add(cur.0, item?);
+                    }
                 }
+            } else {
+                cur = self.founds.pop().unwrap();
             }
 
             // next
-            let scanner = self.scanners.get_mut(&cur.0).unwrap();
-            self.scan_index += 1;
-            if let Some(item) = scanner.next() {
+            let scanner = self.scanners.get_mut(cur.0).unwrap();
+            let item = scanner.next();
+            self.scan_index += scanner.cur_times;
+            if let Some(item) = item {
                 self.founds.add(cur.0, item?);
             }
 
@@ -202,10 +230,16 @@ where
 {
     type Item = GroupItem<K, E>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.founds.is_empty() || self.done {
-            return None;
+        if let Some(scanner) = &mut self.onlyone {
+            let item = scanner.next();
+            self.scan_index += scanner.cur_times;
+            item
+        } else {
+            if self.founds.is_empty() || self.done {
+                return None;
+            }
+            self.next_inner().transpose()
         }
-        self.next_inner().transpose()
     }
 }
 
@@ -268,8 +302,10 @@ where
     reverse: bool,
     since: Option<u64>,
     until: Option<u64>,
-    // scan times
+    // total scan times
     times: u64,
+    // current next scan times
+    cur_times: u64,
 }
 
 impl<'txn, K, E> Scanner<'txn, K, E>
@@ -295,12 +331,15 @@ where
             since,
             until,
             times: 0,
+            cur_times: 0,
         }
     }
 
     fn next_inner(&mut self) -> Result<Option<K>, E> {
+        self.cur_times = 0;
         loop {
             self.times += 1;
+            self.cur_times += 1;
             if let Some(item) = self.inner.next() {
                 let item = item?;
                 let item_key = item.0;
