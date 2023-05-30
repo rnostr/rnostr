@@ -1,0 +1,25 @@
+[package]
+name = "nostr-db-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+criterion = "0.4.0"
+rand = "0.8.5"
+rayon = "1.7.0"
+anyhow = "1.0.70"
+colored = "2.0.0"
+tempfile = "3.4.0"
+nostr-db = { path = "../"}
+nokv-bench = { path = "../nokv/bench"}
+charabia = "0.7.2"
+twox-hash = "1.6.3"
+
+[[bench]]
+name = "sort"
+harness = false
+
+[[bench]]
+name = "event"
+harness = false

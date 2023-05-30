@@ -12,11 +12,17 @@ exclude = [
 ]
 
 [workspace]
-members = ["nokv", "nokv/bench"]
+members = ["nokv", "nokv/bench", "bench"]
 
 [dependencies]
 nokv = { path = "./nokv" }
-
+thiserror = "1.0.40"
+hex = { version = "0.4.3", features = ["serde"] }
+serde = { version = "1.0.160", features = ["derive"] }
+serde_json = "1.0.96"
+rkyv = { version = "0.7.42", features = ["validation"] }
+charabia = "0.7.2"
+zstd = "0.12.3"
 
 [dev-dependencies]
 anyhow = "1.0.70"
