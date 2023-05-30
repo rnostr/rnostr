@@ -1,0 +1,19 @@
+[package]
+name = "nostr-db-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+path = "src/main.rs"
+name = "nostr-db"
+
+[dependencies]
+anyhow = "1.0.70"
+clap = { version = "4.2.7", features = ["derive"] }
+clio = { version = "0.2.7", features = ["clap-parse"] }
+indicatif = "0.17.3"
+nostr-db = { path = "../"}
+rayon = "1.7.0"
+serde = { version = "1.0.160", features = ["derive"] }
+serde_json = "1.0.96"
+thiserror = "1.0.40"

@@ -12,7 +12,7 @@ exclude = [
 ]
 
 [workspace]
-members = ["nokv", "nokv/bench", "bench"]
+members = ["nokv", "nokv/bench", "bench", "cli"]
 
 [dependencies]
 nokv = { path = "./nokv" }
