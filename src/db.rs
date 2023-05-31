@@ -941,7 +941,9 @@ where
             let key = item?;
             if matches!(self.match_index, MatchIndex::None) {
                 self.get_data += 1;
-                return self.document(&key);
+                if let Some(event) = self.document(&key)? {
+                    return Ok(Some(event));
+                }
             } else {
                 let data = self.index_data(&key)?;
                 let event = self.decode_event(&data)?;
@@ -949,7 +951,9 @@ where
                 if let Some(event) = event {
                     if self.match_index.r#match(&self.filter, event) {
                         self.get_data += 1;
-                        return self.document(&key);
+                        if let Some(event) = self.document(&key)? {
+                            return Ok(Some(event));
+                        }
                     }
                 }
             }
