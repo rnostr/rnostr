@@ -1,4 +1,5 @@
 use crate::error::Error;
+#[cfg(feature = "search")]
 use charabia::Segment;
 use rkyv::{
     vec::ArchivedVec, AlignedVec, Archive, Deserialize as RkyvDeserialize,
@@ -310,8 +311,15 @@ impl FromEventJson for String {
     fn from_json<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
         let (t, bytes) = parse_data_type(json.as_ref());
         if t == 1 {
-            let bytes = zstd::decode_all(bytes)?;
-            Ok(unsafe { String::from_utf8_unchecked(bytes) })
+            #[cfg(feature = "zstd")]
+            {
+                let bytes = zstd::decode_all(bytes)?;
+                Ok(unsafe { String::from_utf8_unchecked(bytes) })
+            }
+            #[cfg(not(feature = "zstd"))]
+            {
+                Err(Error::Invald("Need zstd feature".to_owned()))
+            }
         } else {
             Ok(unsafe { String::from_utf8_unchecked(bytes.to_vec()) })
         }
@@ -335,8 +343,15 @@ impl FromEventJson for Event {
     fn from_json<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
         let (t, bytes) = parse_data_type(json.as_ref());
         if t == 1 {
-            let bytes = zstd::decode_all(bytes)?;
-            Ok(serde_json::from_slice(&bytes)?)
+            #[cfg(feature = "zstd")]
+            {
+                let bytes = zstd::decode_all(bytes)?;
+                Ok(serde_json::from_slice(&bytes)?)
+            }
+            #[cfg(not(feature = "zstd"))]
+            {
+                Err(Error::Invald("Need zstd feature".to_owned()))
+            }
         } else {
             Ok(serde_json::from_slice(bytes)?)
         }
@@ -349,6 +364,7 @@ impl Event {
         Ok(serde_json::to_string(&self)?)
     }
 
+    #[cfg(feature = "search")]
     /// build keywords for search ability
     pub fn build_words(&mut self) {
         if self.kind() == 1 {

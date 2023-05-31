@@ -75,6 +75,18 @@ fn latest_seq(db: &Lmdb, tree: &Tree) -> Result<u64, Error> {
     }
 }
 
+#[cfg(feature = "zstd")]
+fn encode_event(event: &Event) -> Result<Vec<u8>> {
+    let json = event.to_json()?;
+    let mut json = zstd::encode_all(json.as_bytes(), 5).map_err(|e| Error::Io(e))?;
+    json.push(1);
+    Ok(json)
+}
+#[cfg(not(feature = "zstd"))]
+fn encode_event(event: &Event) -> Result<String> {
+    event.to_json()
+}
+
 impl Db {
     fn del_event(&self, writer: &mut Writer, event: &Event, uid: &[u8]) -> Result<(), Error> {
         let index_event = event.index();
@@ -165,10 +177,8 @@ impl Db {
 
         // put event
         let time = index_event.created_at();
-        let json = event.to_json()?;
-        // let mut json = zstd::encode_all(json.as_bytes(), 5).map_err(|e| Error::Io(e))?;
-        // json.push(1);
-        // mark compression
+        let json = encode_event(&event)?;
+
         writer.put(&self.t_data, uid, json)?;
 
         // put index

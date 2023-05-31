@@ -1,4 +1,5 @@
 use crate::{error::Error, ArchivedEventIndex, EventIndex};
+#[cfg(feature = "search")]
 use charabia::Segment;
 use serde::Deserialize;
 use serde_json::Value;
@@ -172,6 +173,7 @@ fn clean_empty<T>(list: Option<Vec<T>>) -> Option<Vec<T>> {
 }
 
 impl Filter {
+    #[cfg(feature = "search")]
     /// build keywords for search ability
     pub fn build_words(&mut self) {
         if let Some(search) = &self.search {
