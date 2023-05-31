@@ -7,8 +7,8 @@ mod filter;
 mod key;
 
 pub use {
-    db::Db, db::Iter, error::Error, event::ArchivedEventIndex, event::Event, event::EventIndex,
-    event::FromEventJson, filter::Filter, filter::TagList,
+    db::CheckEventResult, db::Db, db::Iter, error::Error, event::ArchivedEventIndex, event::Event,
+    event::EventIndex, event::FromEventJson, filter::Filter, filter::TagList,
 };
 
 pub use nokv;

@@ -291,6 +291,14 @@ fn get_uid<K: AsRef<[u8]>, T: Transaction>(
     // Ok(None)
 }
 
+pub enum CheckEventResult {
+    Invald(String),
+    Duplicate,
+    Deleted,
+    RepaceIgnored,
+    Ok(usize),
+}
+
 impl Db {
     pub fn flush(&self) -> Result<()> {
         self.inner.flush()?;
@@ -338,13 +346,123 @@ impl Db {
         Ok(self.inner.reader()?)
     }
 
-    pub fn put<II, N>(&self, events: II) -> Result<usize>
+    pub fn put<E: AsRef<Event>>(&self, writer: &mut Writer, event: E) -> Result<CheckEventResult> {
+        let event = event.as_ref();
+        let mut count = 0;
+
+        if event.id().len() != 32 || event.pubkey().len() != 32 {
+            return Ok(CheckEventResult::Invald(
+                "invalid event id or pubkey".to_owned(),
+            ));
+        }
+        // let id: Vec<u8> = pad_start(event.id(), 32);
+        let event_id = event.id();
+        let pubkey = event.pubkey();
+
+        // Check duplicate event.
+        {
+            // dup in the db.
+            if get_uid(writer, &self.t_id_uid, event_id)?.is_some() {
+                return Ok(CheckEventResult::Duplicate);
+            }
+        }
+
+        // check deleted in db
+        if writer
+            .get(&self.t_deletion, concat(&event_id, pubkey))?
+            .is_some()
+        {
+            return Ok(CheckEventResult::Deleted);
+        }
+
+        // [NIP-09](https://nips.be/9)
+        // delete event
+        if event.kind() == 5 {
+            for tag in event.index().tags() {
+                if tag.0 == b"e" {
+                    // let key = hex::decode(&tag.1).map_err(|e| Error::Hex(e))?;
+                    let key = &tag.1;
+                    let r = get_event::<Event, _, _>(writer, &self.t_id_uid, &self.t_data, key)?;
+                    if let Some((uid, e)) = r {
+                        // check author or deletion event
+                        // check delegator
+                        if (e.pubkey() == event.pubkey()
+                            || e.index().delegator() == Some(event.pubkey()))
+                            && e.kind() != 5
+                        {
+                            count += 1;
+                            self.del_event(writer, &e, &uid)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // check replacement event
+        let replace_key = encode_replace_key(event.kind(), event.pubkey(), event.tags());
+
+        if let Some(replace_key) = replace_key.as_ref() {
+            // lmdb max_key_size 511 bytes
+            // we only index tag value length < 255
+            if replace_key.len() > MAX_TAG_VALUE_SIZE + 8 + 32 {
+                return Ok(CheckEventResult::Invald("invalid replace key".to_owned()));
+            }
+
+            // replace in the db
+            let v = writer.get(&self.t_replacement, &replace_key)?;
+            if let Some(v) = v {
+                let uid = v.to_vec();
+                // let t = &v[0..8];
+                // let t = u64_from_bytes(t);
+                // if event.created_at() < t {
+                //     continue;
+                // }
+                let e: Option<Event> = get_event_by_uid(writer, &self.t_data, &uid)?;
+                if let Some(e) = e {
+                    if event.created_at() < e.created_at() {
+                        return Ok(CheckEventResult::RepaceIgnored);
+                    }
+                    // del old
+                    count += 1;
+                    self.del_event(writer, &e, &uid)?;
+                }
+            }
+        }
+
+        count += 1;
+
+        let seq = self.seq.fetch_add(1, Ordering::SeqCst);
+        let seq = u64_to_ver(seq);
+        self.put_event(writer, event, &seq, &replace_key)?;
+        Ok(CheckEventResult::Ok(count))
+    }
+
+    pub fn get<R: FromEventJson, K: AsRef<[u8]>, T: Transaction>(
+        &self,
+        txn: &T,
+        event_id: K,
+    ) -> Result<Option<R>> {
+        let event = get_event(txn, &self.t_id_uid, &self.t_data, event_id)?;
+        Ok(event.map(|e| e.1))
+    }
+
+    pub fn del<K: AsRef<[u8]>>(&self, writer: &mut Writer, event_id: K) -> Result<bool> {
+        if let Some((uid, event)) =
+            get_event::<Event, _, _>(writer, &self.t_id_uid, &self.t_data, event_id.as_ref())?
+        {
+            self.del_event(writer, &event, &uid)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn batch_put<II, N>(&self, events: II) -> Result<usize>
     where
         II: IntoIterator<Item = N>,
         N: AsRef<Event>,
     {
         let mut writer = self.inner.writer()?;
-
         let mut events = events.into_iter().collect::<Vec<N>>();
 
         // sort for check dup
@@ -353,97 +471,46 @@ impl Db {
 
         for (i, event) in events.iter().enumerate() {
             let event = event.as_ref();
-            if event.id().len() != 32 || event.pubkey().len() != 32 {
+            // dup in the input events
+            if i != 0 && event.id() == events[i - 1].as_ref().id() {
                 continue;
             }
-            // let id: Vec<u8> = pad_start(event.id(), 32);
-            let event_id = event.id();
-            let pubkey = event.pubkey();
-
-            // Check duplicate event.
-            {
-                // dup in the input events
-                if i != 0 && event.id() == events[i - 1].as_ref().id() {
-                    continue;
-                }
-                // dup in the db.
-                if get_uid(&writer, &self.t_id_uid, event_id)?.is_some() {
-                    continue;
-                }
+            if let CheckEventResult::Ok(c) = self.put(&mut writer, event)? {
+                count += c;
             }
-
-            // check deleted in db
-            if writer
-                .get(&self.t_deletion, concat(&event_id, pubkey))?
-                .is_some()
-            {
-                continue;
-            }
-
-            // [NIP-09](https://nips.be/9)
-            // delete event
-            if event.kind() == 5 {
-                for tag in event.index().tags() {
-                    if tag.0 == b"e" {
-                        // let key = hex::decode(&tag.1).map_err(|e| Error::Hex(e))?;
-                        let key = &tag.1;
-                        let r =
-                            get_event::<Event, _, _>(&writer, &self.t_id_uid, &self.t_data, key)?;
-                        if let Some((uid, e)) = r {
-                            // check author or deletion event
-                            // check delegator
-                            if (e.pubkey() == event.pubkey()
-                                || e.index().delegator() == Some(event.pubkey()))
-                                && e.kind() != 5
-                            {
-                                count += 1;
-                                self.del_event(&mut writer, &e, &uid)?;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // check replacement event
-            let replace_key = encode_replace_key(event.kind(), event.pubkey(), event.tags());
-
-            if let Some(replace_key) = replace_key.as_ref() {
-                // lmdb max_key_size 511 bytes
-                // we only index tag value length < 255
-                if replace_key.len() > MAX_TAG_VALUE_SIZE + 8 + 32 {
-                    continue;
-                }
-
-                // replace in the db
-                let v = writer.get(&self.t_replacement, &replace_key)?;
-                if let Some(v) = v {
-                    let uid = v.to_vec();
-                    // let t = &v[0..8];
-                    // let t = u64_from_bytes(t);
-                    // if event.created_at() < t {
-                    //     continue;
-                    // }
-                    let e: Option<Event> = get_event_by_uid(&writer, &self.t_data, &uid)?;
-                    if let Some(e) = e {
-                        if event.created_at() < e.created_at() {
-                            continue;
-                        }
-                        // del old
-                        count += 1;
-                        self.del_event(&mut writer, &e, &uid)?;
-                    }
-                }
-            }
-
-            count += 1;
-
-            let seq = self.seq.fetch_add(1, Ordering::SeqCst);
-            let seq = u64_to_ver(seq);
-            self.put_event(&mut writer, event, &seq, &replace_key)?;
         }
 
         writer.commit()?;
         Ok(count)
+    }
+
+    pub fn batch_get<R: FromEventJson, II, N>(&self, event_ids: II) -> Result<Vec<R>>
+    where
+        II: IntoIterator<Item = N>,
+        N: AsRef<[u8]>,
+    {
+        let reader = self.reader()?;
+        let mut events = vec![];
+        for id in event_ids.into_iter() {
+            let r = self.get::<R, _, _>(&reader, &id)?;
+            if let Some(e) = r {
+                events.push(e);
+            }
+        }
+        Ok(events)
+    }
+
+    pub fn batch_del<II, N>(&self, event_ids: II) -> Result<()>
+    where
+        II: IntoIterator<Item = N>,
+        N: AsRef<[u8]>,
+    {
+        let mut writer = self.inner.writer()?;
+        for id in event_ids.into_iter() {
+            self.del(&mut writer, &id)?;
+        }
+        writer.commit()?;
+        Ok(())
     }
 
     pub fn iter<'txn, J: FromEventJson, T: Transaction>(
@@ -486,45 +553,6 @@ impl Db {
         } else {
             Iter::new_time(self, txn, filter, &self.t_created_at, MatchIndex::None)
         }
-    }
-
-    pub fn get_one<R: FromEventJson, K: AsRef<[u8]>>(&self, event_ids: K) -> Result<Option<R>> {
-        let reader = self.inner.reader()?;
-        let event = get_event(&reader, &self.t_id_uid, &self.t_data, event_ids)?;
-        Ok(event.map(|e| e.1))
-    }
-
-    pub fn get<R: FromEventJson, II, N>(&self, event_ids: II) -> Result<Vec<R>>
-    where
-        II: IntoIterator<Item = N>,
-        N: AsRef<[u8]>,
-    {
-        let mut events = vec![];
-        let reader = self.inner.reader()?;
-        for id in event_ids.into_iter() {
-            let r = get_event(&reader, &self.t_id_uid, &self.t_data, id.as_ref())?;
-            if let Some((_, e)) = r {
-                events.push(e);
-            }
-        }
-        Ok(events)
-    }
-
-    pub fn del<II, N>(&self, event_ids: II) -> Result<()>
-    where
-        II: IntoIterator<Item = N>,
-        N: AsRef<[u8]>,
-    {
-        let mut writer = self.inner.writer()?;
-        for id in event_ids.into_iter() {
-            if let Some((uid, event)) =
-                get_event::<Event, _, _>(&mut writer, &self.t_id_uid, &self.t_data, id.as_ref())?
-            {
-                self.del_event(&mut writer, &event, &uid)?;
-            }
-        }
-        writer.commit()?;
-        Ok(())
     }
 
     pub fn iter_expiration<'txn, J: FromEventJson, T: Transaction>(

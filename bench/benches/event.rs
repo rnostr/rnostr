@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use std::{hash::Hasher, str::FromStr, time::Duration};
 use charabia::{Segment, Tokenize};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use nostr_db::{Event, EventIndex};
+use std::{hash::Hasher, str::FromStr, time::Duration};
 use twox_hash::XxHash32;
 
 fn bench_event(c: &mut Criterion) {

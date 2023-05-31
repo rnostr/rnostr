@@ -62,17 +62,19 @@ pub fn test_events() -> Result<()> {
       }]
     "#;
     let events: Vec<Event> = serde_json::from_str(json).unwrap();
-    db.put(&events)?;
+    db.batch_put(&events)?;
     let event = events.get(0).unwrap();
-    let e1 = db.get_one::<Event, _>(event.id())?;
-    assert!(e1.is_some());
-    let e1 = e1.unwrap();
-    assert_eq!(e1.id(), event.id());
-    assert_eq!(&e1.tags(), &event.tags());
+    {
+        let reader = db.reader()?;
+        let e1: Option<Event> = db.get(&reader, event.id())?;
+        assert!(e1.is_some());
+        let e1 = e1.unwrap();
+        assert_eq!(e1.id(), event.id());
+        assert_eq!(&e1.tags(), &event.tags());
+    }
 
-    let li = db.get::<Event, _, _>(vec![event.id()])?;
+    let li = db.batch_get::<Event, _, _>(vec![event.id()])?;
     assert_eq!(li.len(), 1);
-
     Ok(())
 }
 
@@ -101,7 +103,7 @@ pub fn test_events_unexpected() -> Result<()> {
         }
         .into(),
     ];
-    db.put(&events)?;
+    db.batch_put(&events)?;
     Ok(())
 }
 
@@ -135,7 +137,7 @@ pub fn test_events_expiration() -> Result<()> {
         }
         .into(),
     ];
-    db.put(&events)?;
+    db.batch_put(&events)?;
 
     {
         let reader = db.reader()?;
@@ -151,7 +153,7 @@ pub fn test_events_expiration() -> Result<()> {
         // del
         let iter = db.iter_expiration::<Event, _>(&reader, Some(20))?;
         let events = iter.map(|e| e.unwrap()).collect::<Vec<_>>();
-        db.del(events.iter().map(|e| e.id()))?;
+        db.batch_del(events.iter().map(|e| e.id()))?;
     }
     {
         let reader = db.reader()?;
@@ -234,13 +236,16 @@ pub fn test_events_replace() -> Result<()> {
         .into(),
     ];
 
-    db.put(&events)?;
-    assert!(db.get_one::<Event, _>(id(prefix, 1))?.is_none());
-    assert!(db.get_one::<Event, _>(id(prefix, 2))?.is_some());
-    assert!(db.get_one::<Event, _>(id(prefix, 3))?.is_none());
-    assert!(db.get_one::<Event, _>(id(prefix, 4))?.is_none());
-    assert!(db.get_one::<Event, _>(id(prefix, 5))?.is_some());
-    assert!(db.get_one::<Event, _>(id(prefix, 6))?.is_some());
+    db.batch_put(&events)?;
+    {
+        let reader = db.reader()?;
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 1))?.is_none());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 2))?.is_some());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 3))?.is_none());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 4))?.is_none());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 5))?.is_some());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 6))?.is_some());
+    }
 
     let events: Vec<Event> = vec![
         MyEvent {
@@ -263,12 +268,16 @@ pub fn test_events_replace() -> Result<()> {
         .into(),
     ];
 
-    let count = db.put(&events)?;
+    let count = db.batch_put(&events)?;
     assert_eq!(count, 2);
-    assert!(db.get_one::<Event, _>(id(prefix, 5))?.is_some());
-    assert!(db.get_one::<Event, _>(id(prefix, 6))?.is_none());
-    assert!(db.get_one::<Event, _>(id(prefix, 7))?.is_none());
-    assert!(db.get_one::<Event, _>(id(prefix, 8))?.is_some());
+    db.batch_put(&events)?;
+    {
+        let reader = db.reader()?;
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 5))?.is_some());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 6))?.is_none());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 7))?.is_none());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 8))?.is_some());
+    }
     Ok(())
 }
 
@@ -322,10 +331,13 @@ pub fn test_events_del() -> Result<()> {
         .into(),
     ];
     // del in the events
-    let count = db.put(&events)?;
+    let count = db.batch_put(&events)?;
     assert_eq!(count, events.len());
-    assert!(db.get_one::<Event, _>(id(prefix, 1))?.is_some());
-    assert!(db.get_one::<Event, _>(id(prefix, 2))?.is_none());
+    {
+        let reader = db.reader()?;
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 1))?.is_some());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 2))?.is_none());
+    }
 
     let events: Vec<Event> = vec![MyEvent {
         id: id(prefix, 5),
@@ -342,11 +354,14 @@ pub fn test_events_del() -> Result<()> {
         ..Default::default()
     }
     .into()];
-    let count = db.put(&events)?;
+    let count = db.batch_put(&events)?;
     assert_eq!(count, 2);
-    assert!(db.get_one::<Event, _>(id(prefix, 4))?.is_some());
-    assert!(db.get_one::<Event, _>(id(prefix, 5))?.is_some());
-    assert!(db.get_one::<Event, _>(id(prefix, 3))?.is_none());
+    {
+        let reader = db.reader()?;
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 4))?.is_some());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 5))?.is_some());
+        assert!(db.get::<Event, _, _>(&reader, id(prefix, 3))?.is_none());
+    }
 
     Ok(())
 }
@@ -372,7 +387,7 @@ pub fn test_events_dup() -> Result<()> {
         .into(),
     ];
     // dup in the events
-    let count = db.put(&events)?;
+    let count = db.batch_put(&events)?;
     assert_eq!(count, 1);
 
     let events: Vec<Event> = vec![
@@ -392,7 +407,7 @@ pub fn test_events_dup() -> Result<()> {
         .into(),
     ];
     // dup in the db
-    let count = db.put(&events)?;
+    let count = db.batch_put(&events)?;
     assert_eq!(count, 0);
     Ok(())
 }
@@ -426,7 +441,7 @@ pub fn test_events_delegator() -> Result<()> {
         .into(),
     ];
 
-    db.put(&events)?;
+    db.batch_put(&events)?;
     let filter = Filter {
         authors: Some(vec![hex::encode(author(1))]),
         ..Default::default()
@@ -457,7 +472,7 @@ pub fn test_events_delegator() -> Result<()> {
     }
     .into()];
 
-    db.put(&events)?;
+    db.batch_put(&events)?;
     let filter = Filter {
         authors: Some(vec![hex::encode(author(1))]),
         ..Default::default()
@@ -510,7 +525,7 @@ pub fn test_query_count() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     // prefix break time range
     let filter = Filter {
@@ -559,7 +574,7 @@ pub fn test_query_authors_by_prefix() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
     // author 251 time
     let events = (0..PER_NUM)
         .map(|i| {
@@ -574,7 +589,7 @@ pub fn test_query_authors_by_prefix() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     // prefix break time range
     let filter = Filter {
@@ -615,7 +630,7 @@ pub fn test_query_author_kinds() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
     // author 2 kind time
     let events = (0..PER_NUM)
         .map(|i| {
@@ -630,7 +645,7 @@ pub fn test_query_author_kinds() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let filter = Filter {
         authors: Some(vec![hex::encode(author(20))]),
@@ -689,7 +704,7 @@ pub fn test_query_authors() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
     // author 2 tag
     let events = (0..PER_NUM)
         .map(|i| {
@@ -705,7 +720,7 @@ pub fn test_query_authors() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let filter = Filter {
         authors: Some(vec![hex::encode(author(10))]),
@@ -748,7 +763,7 @@ pub fn test_query_created_at() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let filter = Filter {
         since: Some(1_000_000),
@@ -808,7 +823,7 @@ pub fn test_query_tag() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     // author 2 tag
     let events = (0..PER_NUM)
@@ -825,7 +840,7 @@ pub fn test_query_tag() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let json = format!(r###"{{"#e":["{}"]}}"###, key);
     let filter = Filter::from_str(&json).unwrap();
@@ -915,7 +930,7 @@ pub fn test_query_kinds() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
     // author 2 kind time
     let events = (0..PER_NUM)
         .map(|i| {
@@ -930,7 +945,7 @@ pub fn test_query_kinds() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let filter = Filter {
         kinds: Some(vec![1001, 1002, 1003]),
@@ -973,7 +988,7 @@ pub fn test_query_ids() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     // author 3 tag
     let events = (0..PER_NUM)
@@ -990,7 +1005,7 @@ pub fn test_query_ids() -> Result<()> {
             .into()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let filter = Filter {
         ids: Some(vec![hex::encode(id(prefix, 0))]),
@@ -1132,7 +1147,7 @@ pub fn test_query_search() -> Result<()> {
             .into_and_build_words()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let events = (0..PER_NUM)
         .map(|i| {
@@ -1148,7 +1163,7 @@ pub fn test_query_search() -> Result<()> {
             .into_and_build_words()
         })
         .collect::<Vec<Event>>();
-    db.put(events)?;
+    db.batch_put(events)?;
 
     let filter = Filter {
         search: Some("my".to_string()),
@@ -1212,7 +1227,7 @@ pub fn test_query_search() -> Result<()> {
 
     // del
     let events = (0..PER_NUM).map(|i| id(10, i)).collect::<Vec<_>>();
-    db.del(events)?;
+    db.batch_del(events)?;
     let mut filter = Filter {
         search: Some("my".to_string()),
         desc: true,

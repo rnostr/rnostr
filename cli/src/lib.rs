@@ -146,14 +146,14 @@ pub fn import<F: Fn(usize)>(
         let index = item.0;
         if index > 0 && index % batch == 0 {
             // batch write
-            count += db.put(parse_events(&batches, search))?;
+            count += db.batch_put(parse_events(&batches, search))?;
             batches.clear();
         }
         batches.push(line);
         f(index);
     }
 
-    count += db.put(parse_events(&batches, search))?;
+    count += db.batch_put(parse_events(&batches, search))?;
     db.flush()?;
     Ok(count)
 }
