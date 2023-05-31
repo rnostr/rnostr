@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion, Throughput};
-use nokv_bench::gen_pairs;
+use nostr_kv_bench::gen_pairs;
 use rand::Rng;
 use std::{
     collections::VecDeque,

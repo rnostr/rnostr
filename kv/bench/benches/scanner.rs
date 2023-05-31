@@ -1,8 +1,8 @@
 #![allow(dead_code, unused)]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use nokv::{lmdb::Transaction, scanner::*, Error};
-use nokv_bench::*;
+use nostr_kv::{lmdb::Transaction, scanner::*, Error};
+use nostr_kv_bench::*;
 use std::{
     ops::Bound,
     time::{Duration, Instant},
@@ -92,7 +92,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
         .prefix("nokv-bench-scanner")
         .tempdir()
         .unwrap();
-    let db = nokv::lmdb::Db::open_with(
+    let db = nostr_kv::lmdb::Db::open_with(
         dir.path(),
         Some(30),
         Some(1_000),

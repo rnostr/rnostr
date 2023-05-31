@@ -1,5 +1,5 @@
 use crate::error::Error;
-use nokv::scanner::TimeKey;
+use nostr_kv::scanner::TimeKey;
 
 // a separator for compare
 pub const VIEW_KEY_SEP: [u8; 1] = [0];

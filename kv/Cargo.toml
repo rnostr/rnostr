@@ -1,11 +1,7 @@
 [package]
-name = "nokv"
+name = "nostr-kv"
 version = "0.1.0"
-edition = "2021"
-description = "Lmdb"
-license = "MIT OR Apache-2.0"
-homepage = "https://github.com/arronzhang/nostr-db"
-repository = "https://github.com/arronzhang/nostr-db.git"
+description = "Lmdb api for nostr-db"
 keywords = ["lmdb"]
 exclude = [
     ".gitignore",

@@ -1,37 +1,10 @@
-[package]
-name = "nostr-db"
-version = "0.1.0"
+[workspace]
+
+members = ["kv", "kv/bench", "db", "db/bench", "cli"]
+
+[workspace.package]
 edition = "2021"
-description = "Nostr event database"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/arronzhang/nostr-db"
 repository = "https://github.com/arronzhang/nostr-db.git"
-keywords = ["nostr"]
-exclude = [
-    ".gitignore",
-]
-
-[workspace]
-members = ["nokv", "nokv/bench", "bench", "cli"]
-
-[dependencies]
-nokv = { path = "./nokv" }
-thiserror = "1.0.40"
-hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.160", features = ["derive"] }
-serde_json = "1.0.96"
-rkyv = { version = "0.7.42", features = ["validation"] }
-charabia = { version = "0.7.2", optional = true }
-zstd = { version = "0.12.3", optional = true }
-
-[features]
-zstd = ["dep:zstd"]
-search = ["charabia"]
-
-[dev-dependencies]
-anyhow = "1.0.70"
-tempfile = "3.4.0"
-
-[[test]]
-name = "db"
-required-features = ["search"]
+authors = ["Arron zhang <arronzhang@me.com>"]

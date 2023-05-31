@@ -3,7 +3,7 @@ use clap::Parser;
 #[macro_use]
 extern crate clap;
 
-use nostr_db_cli::*;
+use nostr_cli::*;
 
 /// Cli
 #[derive(Debug, Parser)]

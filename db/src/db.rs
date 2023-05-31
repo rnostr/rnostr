@@ -3,7 +3,7 @@ use crate::{
     key::{concat, concat_sep, encode_replace_key, u64_to_ver, IndexKey},
     ArchivedEventIndex, Event, EventIndex, Filter, FromEventJson, Stats,
 };
-use nokv::{
+use nostr_kv::{
     lmdb::{Db as Lmdb, Iter as LmdbIter, *},
     scanner::{Group, MatchResult, Scanner},
 };

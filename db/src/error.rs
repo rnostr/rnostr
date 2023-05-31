@@ -1,7 +1,7 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    Kv(#[from] nokv::Error),
+    Kv(#[from] nostr_kv::Error),
     #[error(transparent)]
     ConvertU64(#[from] std::array::TryFromSliceError),
     #[error("Json: {0}")]

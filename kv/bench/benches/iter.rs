@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use lmdb::{Cursor, Transaction};
-use nokv::lmdb::Transaction as Txn;
-use nokv_bench::*;
+use nostr_kv::lmdb::Transaction as Txn;
+use nostr_kv_bench::*;
 use std::time::{Duration, Instant};
 
 fn bench_put_get1(c: &mut Criterion) {
@@ -28,7 +28,7 @@ fn bench_put_get(c: &mut Criterion, init_len: usize, chunk_size: usize) {
             .prefix("nokv-bench-put-get-lmdb")
             .tempdir()
             .unwrap();
-        let db = nokv::lmdb::Db::open_with(
+        let db = nostr_kv::lmdb::Db::open_with(
             dir.path(),
             Some(30),
             Some(1_000),
@@ -123,7 +123,7 @@ fn bench_create(c: &mut Criterion) {
             .prefix("nokv-bench-create-lmdb")
             .tempdir()
             .unwrap();
-        let db = nokv::lmdb::Db::open_with(
+        let db = nostr_kv::lmdb::Db::open_with(
             dir.path(),
             Some(30),
             Some(1_000),

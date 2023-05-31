@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nokv::{
+use nostr_kv::{
     lmdb::{ffi, Db, Transaction},
     scanner::*,
     Error,

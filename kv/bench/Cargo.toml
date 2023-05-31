@@ -1,5 +1,5 @@
 [package]
-name = "nokv-bench"
+name = "nostr-kv-bench"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -14,7 +14,7 @@ rayon = "1.7.0"
 anyhow = "1.0.71"
 criterion = "0.4.0"
 lmdb-rkv = "0.14.0"
-nokv = { path = "../"}
+nostr-kv = { path = "../"}
 tempfile = "3.5.0"
 thiserror = "1.0.40"
 

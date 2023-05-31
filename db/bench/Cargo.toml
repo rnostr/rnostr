@@ -12,7 +12,7 @@ anyhow = "1.0.70"
 colored = "2.0.0"
 tempfile = "3.4.0"
 nostr-db = { path = "../"}
-nokv-bench = { path = "../nokv/bench"}
+nostr-kv-bench = { path = "../../kv/bench"}
 charabia = "0.7.2"
 twox-hash = "1.6.3"
 

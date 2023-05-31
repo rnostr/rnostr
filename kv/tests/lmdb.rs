@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nokv::lmdb::{ffi, Db, Transaction};
+use nostr_kv::lmdb::{ffi, Db, Transaction};
 use std::ops::{Bound, Deref};
 
 #[test]

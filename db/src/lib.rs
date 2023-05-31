@@ -11,7 +11,7 @@ pub use {
     event::EventIndex, event::FromEventJson, filter::Filter, filter::TagList,
 };
 
-pub use nokv;
+pub use nostr_kv as kv;
 
 /// Stats of query
 #[derive(Debug, Clone)]
