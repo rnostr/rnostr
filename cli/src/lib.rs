@@ -121,6 +121,7 @@ pub fn import<F: Fn(usize)>(
     let lines = reader.lines();
     let mut batches = vec![];
     let mut count = 0;
+
     fn parse_events(batches: &Vec<String>, search: bool) -> Vec<Event> {
         batches
             .par_iter()
@@ -141,19 +142,33 @@ pub fn import<F: Fn(usize)>(
             })
             .collect()
     }
+    let parse_batch = 30;
+    let mut writer = db.writer()?;
     for item in lines.enumerate() {
         let line = item.1?;
         let index = item.0;
-        if index > 0 && index % batch == 0 {
+        if index > 0 && index % parse_batch == 0 {
             // batch write
-            count += db.batch_put(parse_events(&batches, search))?;
+            // count += db.batch_put()?;
+            let events = parse_events(&batches, search);
+            for event in events {
+                db.put(&mut writer, event)?;
+                count += 1;
+            }
             batches.clear();
         }
         batches.push(line);
+        if index > 0 && index % batch == 0 {
+            db.commit(writer)?;
+            writer = db.writer()?;
+        }
         f(index);
     }
 
-    count += db.batch_put(parse_events(&batches, search))?;
+    db.commit(writer)?;
+
+    db.batch_put(parse_events(&batches, search))?;
+    count += batches.len();
     db.flush()?;
     Ok(count)
 }

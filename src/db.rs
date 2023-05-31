@@ -356,6 +356,10 @@ impl Db {
         Ok(self.inner.reader()?)
     }
 
+    pub fn commit<T: Transaction>(&self, txn: T) -> Result<()> {
+        Ok(txn.commit()?)
+    }
+
     pub fn put<E: AsRef<Event>>(&self, writer: &mut Writer, event: E) -> Result<CheckEventResult> {
         let event = event.as_ref();
         let mut count = 0;
