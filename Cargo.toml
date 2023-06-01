@@ -1,6 +1,13 @@
 [workspace]
 
-members = ["kv", "kv/bench", "db", "db/bench", "cli"]
+members = [
+    "kv", 
+    "kv/bench", 
+    "db", 
+    "db/bench", 
+    "cli", 
+    "relay",
+]
 
 [workspace.package]
 edition = "2021"
