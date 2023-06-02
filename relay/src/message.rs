@@ -1,3 +1,4 @@
+use bytestring::ByteString;
 use nostr_db::{Event, Filter};
 use serde::{
     de::{self, SeqAccess, Visitor},
@@ -95,6 +96,12 @@ impl Display for OutgoingMessage {
             }
         }
         Ok(())
+    }
+}
+
+impl Into<ByteString> for OutgoingMessage {
+    fn into(self) -> ByteString {
+        ByteString::from(self.to_string())
     }
 }
 
