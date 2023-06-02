@@ -7,5 +7,6 @@ pub enum Error {
 }
 
 mod message;
+mod server;
 
-pub use message::*;
+pub use {message::*, server::*};
