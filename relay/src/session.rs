@@ -47,9 +47,6 @@ impl Session {
             // check client heartbeats
             if Instant::now().duration_since(act.hb) > act.heartbeat_timeout {
                 // heartbeat timed out
-                // notify server
-                act.server.do_send(Disconnect { id: act.id });
-
                 // stop actor
                 ctx.stop();
 
@@ -157,5 +154,84 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
             }
             ws::Message::Nop => (),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::create_app;
+    use actix_web_actors::ws;
+    use anyhow::Result;
+    use bytes::Bytes;
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio::time::{sleep, Duration};
+
+    #[actix_rt::test]
+    async fn pingpong() -> Result<()> {
+        let data = AppData::new();
+
+        let mut srv = actix_test::start(move || create_app(data.clone()));
+
+        // client service
+        let mut framed = srv.ws_at("/").await.unwrap();
+
+        framed.send(ws::Message::Ping("text".into())).await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Pong(Bytes::copy_from_slice(b"text")));
+
+        framed
+            .send(ws::Message::Close(Some(ws::CloseCode::Normal.into())))
+            .await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Close(Some(ws::CloseCode::Normal.into())));
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn heartbeat() -> Result<()> {
+        let data = AppData::new();
+        {
+            let mut w = data.setting.write();
+            w.session.heartbeat_interval = 1;
+            w.session.heartbeat_timeout = 20;
+        }
+        let mut srv = actix_test::start(move || create_app(data.clone()));
+
+        // client service
+        let mut framed = srv.ws_at("/").await.unwrap();
+
+        sleep(Duration::from_secs(3)).await;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Ping(Bytes::copy_from_slice(b"")));
+
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Ping(Bytes::copy_from_slice(b"")));
+
+        framed
+            .send(ws::Message::Close(Some(ws::CloseCode::Normal.into())))
+            .await?;
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn heartbeat_timeout() -> Result<()> {
+        let data = AppData::new();
+        {
+            let mut w = data.setting.write();
+            w.session.heartbeat_interval = 1;
+            w.session.heartbeat_timeout = 2;
+        }
+        let mut srv = actix_test::start(move || create_app(data.clone()));
+
+        // client service
+        let mut framed = srv.ws_at("/").await.unwrap();
+
+        sleep(Duration::from_secs(3)).await;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Ping(Bytes::copy_from_slice(b"")));
+        let item = framed.next().await;
+        assert!(item.is_none());
+        Ok(())
     }
 }
