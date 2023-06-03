@@ -7,8 +7,10 @@ pub enum Error {
 }
 
 mod app;
-mod message;
+pub mod message;
 mod server;
 mod session;
 
-pub use {app::create_app, app::route, app::start_app, message::*, server::*, session::Session};
+pub use {
+    app::create_app, app::route, app::start_app, server::Server, server::*, session::Session,
+};

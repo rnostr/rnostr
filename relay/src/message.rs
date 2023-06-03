@@ -1,3 +1,4 @@
+use actix::{Message, Recipient};
 use bytestring::ByteString;
 use nostr_db::{Event, Filter};
 use serde::{
@@ -8,7 +9,33 @@ use serde_json::json;
 use std::fmt::Display;
 use std::{fmt, marker::PhantomData};
 
-/// incoming messages from a client
+/// New session is created
+#[derive(Message)]
+#[rtype(usize)]
+pub struct Connect {
+    pub addr: Recipient<OutgoingMessage>,
+}
+
+/// Session is disconnected
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Disconnect {
+    pub id: usize,
+}
+
+/// Message from client
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ClientMessage {
+    /// Id of the client session
+    pub id: usize,
+    /// text message
+    pub text: String,
+    /// parsed message
+    pub msg: IncomingMessage,
+}
+
+/// parse incoming messages from a client
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "UPPERCASE", tag = "0")]
 pub enum IncomingMessage {
@@ -72,7 +99,8 @@ impl<'de> Deserialize<'de> for Subscription {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
 pub enum OutgoingMessage {
     /// message
     Notice(String),
