@@ -159,11 +159,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
 mod tests {
     use super::*;
     use crate::create_app;
+    use actix_rt::time::sleep;
     use actix_web_actors::ws;
     use anyhow::Result;
     use bytes::Bytes;
     use futures_util::{SinkExt as _, StreamExt as _};
-    use tokio::time::{sleep, Duration};
 
     #[actix_rt::test]
     async fn pingpong() -> Result<()> {
