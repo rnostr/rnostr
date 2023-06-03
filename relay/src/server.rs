@@ -45,6 +45,35 @@ impl Handler<Disconnect> for Server {
 /// Handler for Message message.
 impl Handler<ClientMessage> for Server {
     type Result = ();
-
     fn handle(&mut self, _msg: ClientMessage, _: &mut Context<Self>) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+
+    #[derive(Default)]
+    struct Receiver;
+    impl Actor for Receiver {
+        type Context = Context<Self>;
+    }
+
+    impl Handler<OutgoingMessage> for Receiver {
+        type Result = ();
+        fn handle(&mut self, _msg: OutgoingMessage, _ctx: &mut Self::Context) {}
+    }
+
+    #[actix_rt::test]
+    async fn connect() -> Result<()> {
+        let server = Server::start_default();
+        let receiver = Receiver::start_default();
+        let id = server
+            .send(Connect {
+                addr: receiver.recipient(),
+            })
+            .await?;
+        assert_eq!(id, 1);
+        Ok(())
+    }
 }
