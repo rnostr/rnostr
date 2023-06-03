@@ -1,4 +1,4 @@
-use crate::Server;
+use crate::{Result, Server, Setting};
 use actix::{Actor, Addr};
 use actix_cors::Cors;
 use actix_web::{
@@ -6,38 +6,37 @@ use actix_web::{
     dev::{ServiceFactory, ServiceRequest},
     web, App, HttpServer,
 };
-use std::net::ToSocketAddrs;
+use parking_lot::RwLock;
+use std::{net::ToSocketAddrs, sync::Arc};
 
 pub mod route {
-    use crate::{Server, Session};
-    use actix::Addr;
+    use crate::{AppData, Session};
     use actix_http::header::{ACCEPT, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
-    use std::time::Instant;
 
     pub async fn websocket(
         req: HttpRequest,
         stream: web::Payload,
-        server: web::Data<Addr<Server>>,
+        data: web::Data<AppData>,
     ) -> Result<HttpResponse, Error> {
         ws::start(
-            Session {
-                id: 0,
-                ip: req
-                    .connection_info()
+            Session::new(
+                req.connection_info()
                     .realip_remote_addr()
                     .map(ToOwned::to_owned)
                     .unwrap_or_default(),
-                hb: Instant::now(),
-                server: server.get_ref().clone(),
-            },
+                data.get_ref(),
+            ),
             &req,
             stream,
         )
     }
 
-    pub async fn info(_req: HttpRequest, _stream: web::Payload) -> Result<HttpResponse, Error> {
+    pub async fn information(
+        _req: HttpRequest,
+        _stream: web::Payload,
+    ) -> Result<HttpResponse, Error> {
         Ok(HttpResponse::Ok()
             .insert_header(("Content-Type", "application/nostr+json"))
             .body("info"))
@@ -46,15 +45,15 @@ pub mod route {
     pub async fn index(
         req: HttpRequest,
         stream: web::Payload,
-        server: web::Data<Addr<Server>>,
+        data: web::Data<AppData>,
     ) -> Result<HttpResponse, Error> {
         let headers = req.headers();
         if headers.contains_key(UPGRADE) {
-            return websocket(req, stream, server).await;
+            return websocket(req, stream, data).await;
         } else if let Some(accept) = headers.get(ACCEPT) {
             if let Ok(accept) = accept.to_str() {
                 if accept.contains("application/nostr+json") {
-                    return info(req, stream).await;
+                    return information(req, stream).await;
                 }
             }
         }
@@ -63,8 +62,23 @@ pub mod route {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct AppData {
+    pub server: Addr<Server>,
+    pub setting: Arc<RwLock<Setting>>,
+}
+
+impl AppData {
+    pub fn new() -> Self {
+        Self {
+            server: Server::default().start(),
+            setting: Arc::new(RwLock::new(Setting::default())),
+        }
+    }
+}
+
 pub fn create_app(
-    server: Addr<Server>,
+    data: AppData,
 ) -> App<
     impl ServiceFactory<
         ServiceRequest,
@@ -75,7 +89,7 @@ pub fn create_app(
     >,
 > {
     let app = App::new();
-    app.app_data(web::Data::new(server))
+    app.app_data(web::Data::new(data))
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(
             Cors::default()
@@ -87,10 +101,10 @@ pub fn create_app(
         )
 }
 
-pub async fn start_app<A: ToSocketAddrs>(addrs: A) -> Result<(), std::io::Error> {
+pub async fn start_app<A: ToSocketAddrs>(addrs: A, data: AppData) -> Result<(), std::io::Error> {
     // start server actor
-    let server = Server::default().start();
-    HttpServer::new(move || create_app(server.clone()))
+    // let server = Server::default().start();
+    HttpServer::new(move || create_app(data.clone()))
         // .workers(2)
         .bind(addrs)?
         .run()
@@ -112,8 +126,8 @@ mod tests {
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let server = Server::default().start();
-        let app = init_service(create_app(server)).await;
+        let data = AppData::new();
+        let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
             .to_request();
@@ -129,9 +143,9 @@ mod tests {
 
     #[actix_rt::test]
     async fn connect() -> Result<()> {
-        let server = Server::default().start();
+        let data = AppData::new();
 
-        let mut srv = actix_test::start(move || create_app(server.clone()));
+        let mut srv = actix_test::start(move || create_app(data.clone()));
 
         // client service
         let mut framed = srv.ws_at("/").await.unwrap();

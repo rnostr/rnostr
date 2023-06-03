@@ -1,13 +1,7 @@
-use crate::{message::*, Server};
+use crate::{message::*, AppData, Server};
 use actix::prelude::*;
 use actix_web_actors::ws;
 use std::time::{Duration, Instant};
-
-/// How often heartbeat pings are sent
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-
-/// How long before lack of client response causes a timeout
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub struct Session {
@@ -22,16 +16,36 @@ pub struct Session {
 
     /// server
     pub server: Addr<Server>,
+
+    /// heartbeat timeout
+    /// How long before lack of client response causes a timeout
+    pub heartbeat_timeout: Duration,
+
+    /// heartbeat interval
+    /// How often heartbeat pings are sent
+    pub heartbeat_interval: Duration,
 }
 
 impl Session {
+    pub fn new(ip: String, data: &AppData) -> Session {
+        let setting = data.setting.read();
+        Self {
+            id: 0,
+            ip,
+            hb: Instant::now(),
+            server: data.server.clone(),
+            heartbeat_timeout: Duration::from_secs(setting.session.heartbeat_timeout),
+            heartbeat_interval: Duration::from_secs(setting.session.heartbeat_interval),
+        }
+    }
+
     /// helper method that sends ping to client every 5 seconds (HEARTBEAT_INTERVAL).
     ///
     /// also this method checks heartbeats from client
     fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
-        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+        ctx.run_interval(self.heartbeat_interval, |act, ctx| {
             // check client heartbeats
-            if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
+            if Instant::now().duration_since(act.hb) > act.heartbeat_timeout {
                 // heartbeat timed out
                 // notify server
                 act.server.do_send(Disconnect { id: act.id });
