@@ -39,8 +39,7 @@ impl Session {
         }
     }
 
-    /// helper method that sends ping to client every 5 seconds (HEARTBEAT_INTERVAL).
-    ///
+    /// helper method that sends ping to client.
     /// also this method checks heartbeats from client
     fn hb(&self, ctx: &mut ws::WebsocketContext<Self>) {
         ctx.run_interval(self.heartbeat_interval, |act, ctx| {
@@ -49,7 +48,6 @@ impl Session {
                 // heartbeat timed out
                 // stop actor
                 ctx.stop();
-
                 // don't try to send a ping
                 return;
             }

@@ -18,9 +18,9 @@ pub struct Information {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Session {
-    /// heartbeat interval
+    /// heartbeat interval in seconds
     pub heartbeat_interval: u64,
-    /// heartbeat timeout
+    /// heartbeat timeout in seconds
     pub heartbeat_timeout: u64,
 }
 
