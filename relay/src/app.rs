@@ -71,7 +71,7 @@ pub struct AppData {
 impl AppData {
     pub fn new() -> Self {
         Self {
-            server: Server::default().start(),
+            server: Server::start_default(),
             setting: Arc::new(RwLock::new(Setting::default())),
         }
     }
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn connect() -> Result<()> {
+    async fn connect_ws() -> Result<()> {
         let data = AppData::new();
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
