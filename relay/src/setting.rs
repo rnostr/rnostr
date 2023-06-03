@@ -27,8 +27,8 @@ pub struct Session {
 impl Default for Session {
     fn default() -> Self {
         Self {
-            heartbeat_interval: 5,
-            heartbeat_timeout: 10,
+            heartbeat_interval: 60,
+            heartbeat_timeout: 120,
         }
     }
 }
