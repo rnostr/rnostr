@@ -165,7 +165,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn pingpong() -> Result<()> {
-        let data = AppData::new();
+        let data = AppData::new()?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
@@ -186,7 +186,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat() -> Result<()> {
-        let data = AppData::new();
+        let data = AppData::new()?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;
@@ -212,7 +212,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat_timeout() -> Result<()> {
-        let data = AppData::new();
+        let data = AppData::new()?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;

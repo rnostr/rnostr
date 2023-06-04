@@ -40,6 +40,11 @@ pub struct Setting {
 }
 
 impl Setting {
+    /// information json
+    pub fn information(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(&self.information)?)
+    }
+
     pub fn read<P: AsRef<Path>>(file: P) -> Result<Self> {
         let def = Self::default();
 

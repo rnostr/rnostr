@@ -8,9 +8,13 @@ pub enum Error {
     Notify(#[from] notify::Error),
     #[error(transparent)]
     Prometheus(#[from] prometheus::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[error("error: {0}")]
     Message(String),
 }
+
+impl actix_web::ResponseError for Error {}
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 

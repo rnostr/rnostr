@@ -4,7 +4,7 @@ use prometheus::{
     TextEncoder,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Metrics {
     pub query_sub: Histogram,        // response time of successful subscriptions
     pub query_db: Histogram,         // individual database query execution time

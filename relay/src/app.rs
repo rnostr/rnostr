@@ -1,4 +1,4 @@
-use crate::{Result, Server, Setting};
+use crate::{Metrics, Result, Server, Setting};
 use actix::{Actor, Addr};
 use actix_cors::Cors;
 use actix_web::{
@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use std::{net::ToSocketAddrs, sync::Arc};
 
 pub mod route {
-    use crate::{AppData, Session};
+    use crate::{AppData, Metrics, Session};
     use actix_http::header::{ACCEPT, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
@@ -36,10 +36,12 @@ pub mod route {
     pub async fn information(
         _req: HttpRequest,
         _stream: web::Payload,
+        data: web::Data<AppData>,
     ) -> Result<HttpResponse, Error> {
+        let r = data.setting.read();
         Ok(HttpResponse::Ok()
             .insert_header(("Content-Type", "application/nostr+json"))
-            .body("info"))
+            .body(r.information()?))
     }
 
     pub async fn index(
@@ -53,12 +55,22 @@ pub mod route {
         } else if let Some(accept) = headers.get(ACCEPT) {
             if let Ok(accept) = accept.to_str() {
                 if accept.contains("application/nostr+json") {
-                    return information(req, stream).await;
+                    return information(req, stream, data).await;
                 }
             }
         }
 
         Ok(HttpResponse::Ok().body("Hello World!"))
+    }
+
+    pub async fn metrics(
+        _req: HttpRequest,
+        _stream: web::Payload,
+        data: web::Data<AppData>,
+    ) -> Result<HttpResponse, Error> {
+        Ok(HttpResponse::Ok()
+            .insert_header(("Content-Type", "text/plain"))
+            .body(Metrics::render(&data.registry)?))
     }
 }
 
@@ -66,14 +78,19 @@ pub mod route {
 pub struct AppData {
     pub server: Addr<Server>,
     pub setting: Arc<RwLock<Setting>>,
+    pub registry: prometheus::Registry,
+    pub metrics: Metrics,
 }
 
 impl AppData {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Result<Self> {
+        let (registry, metrics) = Metrics::create()?;
+        Ok(Self {
             server: Server::start_default(),
             setting: Arc::new(RwLock::new(Setting::default())),
-        }
+            registry,
+            metrics,
+        })
     }
 }
 
@@ -90,6 +107,7 @@ pub fn create_app(
 > {
     let app = App::new();
     app.app_data(web::Data::new(data))
+        .service(web::resource("/metrics").route(web::get().to(route::metrics)))
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(
             Cors::default()
@@ -126,7 +144,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = AppData::new();
+        let data = AppData::new()?;
         let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
@@ -143,7 +161,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = AppData::new();
+        let data = AppData::new()?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
