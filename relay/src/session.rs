@@ -131,7 +131,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                         });
                     }
                     Err(err) => {
-                        ctx.text(OutgoingMessage::Notice(format!(
+                        ctx.text(OutgoingMessage::notice(&format!(
                             "json error: {}",
                             err.to_string()
                         )));
@@ -143,9 +143,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 ctx.stop();
             }
             ws::Message::Binary(_) => {
-                ctx.text(OutgoingMessage::Notice(String::from(
-                    "Not support binary message",
-                )));
+                ctx.text(OutgoingMessage::notice("Not support binary message"));
             }
             ws::Message::Continuation(_) => {
                 ctx.stop();

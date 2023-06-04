@@ -14,6 +14,9 @@ impl Actor for Server {
     /// We are going to use simple Context, we just need ability to communicate
     /// with other actors.
     type Context = Context<Self>;
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        // ctx.set_mailbox_capacity(1);
+    }
 }
 
 /// Handler for Connect message.
@@ -21,7 +24,7 @@ impl Actor for Server {
 /// Register new session and assign unique id to this session
 impl Handler<Connect> for Server {
     type Result = usize;
-    fn handle(&mut self, msg: Connect, _: &mut Context<Self>) -> Self::Result {
+    fn handle(&mut self, msg: Connect, _ctx: &mut Context<Self>) -> Self::Result {
         if self.id == usize::MAX {
             self.id = 0;
         }

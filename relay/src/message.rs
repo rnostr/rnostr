@@ -101,35 +101,44 @@ impl<'de> Deserialize<'de> for Subscription {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub enum OutgoingMessage {
-    /// message
-    Notice(String),
-    /// subscription id
-    Eose(String),
-    /// subscription id, event string
-    Event(String, String),
+pub struct OutgoingMessage(pub String);
+//  {
+//     /// message
+//     Notice(String),
+//     /// subscription id
+//     Eose(String),
+//     /// subscription id, event string
+//     Event(String, String),
+//     /// nip-20
+//     /// event id, saved, message
+//     Ok(String, bool, String),
+// }
+impl OutgoingMessage {
+    pub fn notice(message: &str) -> Self {
+        Self(json!(["NOTICE", message]).to_string())
+    }
+    pub fn eose(sub_id: &str) -> Self {
+        Self(json!(["EOSE", sub_id]).to_string())
+    }
+    pub fn event(sub_id: &str, event: &str) -> Self {
+        Self(json!(["EVENT", sub_id, event]).to_string())
+    }
+
+    pub fn ok(event_id: &str, saved: bool, message: &str) -> Self {
+        Self(json!(["Ok", event_id, saved, message]).to_string())
+    }
 }
 
 impl Display for OutgoingMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            OutgoingMessage::Notice(notice) => {
-                f.write_str(&json!(["NOTICE", notice]).to_string())?;
-            }
-            OutgoingMessage::Eose(sub_id) => {
-                f.write_str(&json!(["EOSE", sub_id]).to_string())?;
-            }
-            OutgoingMessage::Event(sub_id, event) => {
-                f.write_str(&json!(["EVENT", sub_id, event]).to_string())?;
-            }
-        }
+        f.write_str(&self.0)?;
         Ok(())
     }
 }
 
 impl Into<ByteString> for OutgoingMessage {
     fn into(self) -> ByteString {
-        ByteString::from(self.to_string())
+        ByteString::from(self.0)
     }
 }
 
@@ -178,13 +187,13 @@ mod tests {
 
     #[test]
     fn se_outgoing_message() -> Result<()> {
-        let msg = OutgoingMessage::Notice("hello".to_string());
+        let msg = OutgoingMessage::notice("hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["NOTICE","hello"]"#);
-        let msg = OutgoingMessage::Event("id".to_string(), "event".to_string());
+        let msg = OutgoingMessage::event("id", "event");
         let json = msg.to_string();
         assert_eq!(json, r#"["EVENT","id","event"]"#);
-        let msg = OutgoingMessage::Eose("hello".to_string());
+        let msg = OutgoingMessage::eose("hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["EOSE","hello"]"#);
         Ok(())
