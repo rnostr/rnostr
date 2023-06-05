@@ -1,4 +1,4 @@
-use crate::{Metrics, Result, Server, Setting};
+use crate::{Result, Server, Setting};
 use actix::{Actor, Addr};
 use actix_cors::Cors;
 use actix_web::{
@@ -6,11 +6,13 @@ use actix_web::{
     dev::{ServiceFactory, ServiceRequest},
     web, App, HttpServer,
 };
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use metrics_util::MetricKindMask;
 use parking_lot::RwLock;
-use std::{net::ToSocketAddrs, sync::Arc};
+use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
 
 pub mod route {
-    use crate::{AppData, Metrics, Session};
+    use crate::{AppData, Session};
     use actix_http::header::{ACCEPT, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
@@ -41,7 +43,7 @@ pub mod route {
         let r = data.setting.read();
         Ok(HttpResponse::Ok()
             .insert_header(("Content-Type", "application/nostr+json"))
-            .body(r.information()?))
+            .body(r.render_information()?))
     }
 
     pub async fn index(
@@ -70,26 +72,28 @@ pub mod route {
     ) -> Result<HttpResponse, Error> {
         Ok(HttpResponse::Ok()
             .insert_header(("Content-Type", "text/plain"))
-            .body(Metrics::render(&data.registry)?))
+            .body(data.prometheus_handle.render()))
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AppData {
     pub server: Addr<Server>,
     pub setting: Arc<RwLock<Setting>>,
-    pub registry: prometheus::Registry,
-    pub metrics: Metrics,
+    pub prometheus_handle: PrometheusHandle,
 }
 
 impl AppData {
-    pub fn new() -> Result<Self> {
-        let (registry, metrics) = Metrics::create()?;
+    pub fn create() -> Result<Self> {
+        let builder = PrometheusBuilder::new();
+        let prometheus_handle = builder
+            .idle_timeout(MetricKindMask::ALL, Some(Duration::from_secs(10)))
+            .install_recorder()?;
+
         Ok(Self {
             server: Server::start_default(),
             setting: Arc::new(RwLock::new(Setting::default())),
-            registry,
-            metrics,
+            prometheus_handle,
         })
     }
 }
@@ -135,7 +139,7 @@ mod tests {
     use super::*;
     use actix_web::{
         dev::Service,
-        test::{init_service, TestRequest},
+        test::{init_service, read_body, TestRequest},
     };
     use actix_web_actors::ws;
     use anyhow::Result;
@@ -144,7 +148,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = AppData::new()?;
+        let data = AppData::create()?;
         let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
@@ -160,8 +164,24 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn metrics() -> Result<()> {
+        let data = AppData::create()?;
+        metrics::increment_counter!("test_metric");
+
+        let app = init_service(create_app(data)).await;
+        let req = TestRequest::with_uri("/metrics").to_request();
+        let res = app.call(req).await.unwrap();
+        assert_eq!(res.status(), 200);
+
+        let result = read_body(res).await;
+        let result = String::from_utf8(result.to_vec())?;
+        assert!(result.contains("test_metric"));
+        Ok(())
+    }
+
+    #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = AppData::new()?;
+        let data = AppData::create()?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 

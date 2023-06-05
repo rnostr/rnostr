@@ -7,7 +7,7 @@ pub enum Error {
     #[error(transparent)]
     Notify(#[from] notify::Error),
     #[error(transparent)]
-    Prometheus(#[from] prometheus::Error),
+    Prometheus(#[from] metrics_exporter_prometheus::BuildError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("error: {0}")]
@@ -20,9 +20,8 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 mod app;
 pub mod message;
-mod metrics;
 mod server;
 mod session;
 mod setting;
 
-pub use {app::*, metrics::Metrics, server::Server, server::*, session::Session, setting::Setting};
+pub use {app::*, server::Server, server::*, session::Session, setting::Setting};

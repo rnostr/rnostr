@@ -18,10 +18,13 @@ pub struct Information {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Session {
-    /// heartbeat interval in seconds
-    pub heartbeat_interval: u64,
-    /// heartbeat timeout in seconds
+    /// heartbeat timeout
+    /// How long before lack of client response causes a timeout
     pub heartbeat_timeout: u64,
+
+    /// heartbeat interval
+    /// How often heartbeat pings are sent
+    pub heartbeat_interval: u64,
 }
 
 impl Default for Session {
@@ -39,9 +42,11 @@ pub struct Setting {
     pub session: Session,
 }
 
+pub type SettingWrapper = Arc<RwLock<Setting>>;
+
 impl Setting {
     /// information json
-    pub fn information(&self) -> Result<String> {
+    pub fn render_information(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.information)?)
     }
 
@@ -60,7 +65,7 @@ impl Setting {
         Ok(config)
     }
 
-    pub fn watch<P: AsRef<Path>>(file: P) -> Result<(Arc<RwLock<Self>>, RecommendedWatcher)> {
+    pub fn watch<P: AsRef<Path>>(file: P) -> Result<(SettingWrapper, RecommendedWatcher)> {
         let setting = Self::read(&file)?;
         let setting = Arc::new(RwLock::new(setting));
         let c_file = file.as_ref().to_path_buf();
