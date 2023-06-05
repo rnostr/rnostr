@@ -163,9 +163,15 @@ mod tests {
     use bytes::Bytes;
     use futures_util::{SinkExt as _, StreamExt as _};
 
+    fn db_path(p: &str) -> Result<tempfile::TempDir> {
+        Ok(tempfile::Builder::new()
+            .prefix(&format!("nostr-relay-test-db-{}", p))
+            .tempdir()?)
+    }
+
     #[actix_rt::test]
     async fn pingpong() -> Result<()> {
-        let data = AppData::create()?;
+        let data = AppData::create(Some(db_path("session")?))?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
@@ -186,7 +192,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat() -> Result<()> {
-        let data = AppData::create()?;
+        let data = AppData::create(Some(db_path("session")?))?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;
@@ -212,7 +218,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat_timeout() -> Result<()> {
-        let data = AppData::create()?;
+        let data = AppData::create(Some(db_path("session")?))?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;

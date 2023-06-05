@@ -3,7 +3,7 @@ use config::{Config, File};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -36,15 +36,49 @@ impl Default for Session {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Db {
+    pub path: PathBuf,
+}
+
+impl Default for Db {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from("./db"),
+        }
+    }
+}
+
+/// number of threads config
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Thread {
+    /// number of http server threads
+    pub http: usize,
+    /// number of read event threads
+    pub reader: usize,
+}
+
+impl Default for Thread {
+    fn default() -> Self {
+        Self { reader: 0, http: 0 }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Setting {
     pub information: Information,
     pub session: Session,
+    pub db: Db,
+    pub thread: Thread,
 }
 
 pub type SettingWrapper = Arc<RwLock<Setting>>;
 
 impl Setting {
+    pub fn default_wrapper() -> SettingWrapper {
+        Arc::new(RwLock::new(Self::default()))
+    }
+
     /// information json
     pub fn render_information(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.information)?)

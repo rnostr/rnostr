@@ -1,5 +1,5 @@
 use crate::{Result, Server, Setting};
-use actix::{Actor, Addr};
+use actix::Addr;
 use actix_cors::Cors;
 use actix_web::{
     body::MessageBody,
@@ -8,8 +8,9 @@ use actix_web::{
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
+use nostr_db::Db;
 use parking_lot::RwLock;
-use std::{net::ToSocketAddrs, sync::Arc, time::Duration};
+use std::{net::ToSocketAddrs, path::Path, sync::Arc, time::Duration};
 
 pub mod route {
     use crate::{AppData, Session};
@@ -84,15 +85,25 @@ pub struct AppData {
 }
 
 impl AppData {
-    pub fn create() -> Result<Self> {
+    pub fn create<P: AsRef<Path>>(db_path: Option<P>) -> Result<Self> {
+        let setting = Setting::default_wrapper();
+
+        let r = setting.read();
+        let path = db_path
+            .map(|p| p.as_ref().to_path_buf())
+            .unwrap_or(r.db.path.clone());
+        drop(r);
+        let db = Arc::new(Db::open(path)?);
+
         let builder = PrometheusBuilder::new();
         let prometheus_handle = builder
             .idle_timeout(MetricKindMask::ALL, Some(Duration::from_secs(10)))
             .install_recorder()?;
+        let server = Server::create_with(db, Arc::clone(&setting));
 
         Ok(Self {
-            server: Server::start_default(),
-            setting: Arc::new(RwLock::new(Setting::default())),
+            server,
+            setting,
             prometheus_handle,
         })
     }
@@ -126,11 +137,19 @@ pub fn create_app(
 pub async fn start_app<A: ToSocketAddrs>(addrs: A, data: AppData) -> Result<(), std::io::Error> {
     // start server actor
     // let server = Server::default().start();
+    let r = data.setting.read();
+    let num = if r.thread.reader == 0 {
+        num_cpus::get()
+    } else {
+        r.thread.reader
+    };
+    drop(r);
     HttpServer::new(move || create_app(data.clone()))
-        // .workers(2)
+        .workers(num)
         .bind(addrs)?
         .run()
         .await?;
+    //TODO: save db
     Ok(())
 }
 
@@ -146,9 +165,15 @@ mod tests {
     use bytes::Bytes;
     use futures_util::{SinkExt as _, StreamExt as _};
 
+    fn db_path(p: &str) -> Result<tempfile::TempDir> {
+        Ok(tempfile::Builder::new()
+            .prefix(&format!("nostr-relay-test-db-{}", p))
+            .tempdir()?)
+    }
+
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = AppData::create()?;
+        let data = AppData::create(Some(db_path("")?))?;
         let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
@@ -165,7 +190,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
-        let data = AppData::create()?;
+        let data = AppData::create(Some(db_path("")?))?;
         metrics::increment_counter!("test_metric");
 
         let app = init_service(create_app(data)).await;
@@ -181,7 +206,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = AppData::create()?;
+        let data = AppData::create(Some(db_path("")?))?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 

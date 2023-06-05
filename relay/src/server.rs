@@ -1,12 +1,61 @@
-use crate::message::*;
+use crate::{message::*, setting::SettingWrapper, Reader, Subscriber, Writer};
 use actix::prelude::*;
-use std::collections::HashMap;
+use nostr_db::Db;
+use std::{collections::HashMap, sync::Arc};
 
 /// Server
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Server {
     id: usize,
+    writer: Addr<Writer>,
+    reader: Addr<Reader>,
+    subscriber: Addr<Subscriber>,
     sessions: HashMap<usize, Recipient<OutgoingMessage>>,
+}
+
+impl Server {
+    pub fn create_with(db: Arc<Db>, setting: SettingWrapper) -> Addr<Server> {
+        let r = setting.read();
+        let num = if r.thread.reader == 0 {
+            num_cpus::get()
+        } else {
+            r.thread.reader
+        };
+        drop(r);
+
+        Server::create(|ctx| {
+            let writer = Writer {
+                db: Arc::clone(&db),
+                addr: ctx.address().recipient(),
+                events: vec![],
+            }
+            .start();
+
+            let subscriber = Subscriber::new(ctx.address().recipient()).start();
+
+            let addr = ctx.address().recipient();
+
+            let reader = SyncArbiter::start(num, move || Reader {
+                db: Arc::clone(&db),
+                addr: addr.clone(),
+                subscriptions: vec![],
+            });
+
+            Server {
+                id: 0,
+                writer,
+                reader,
+                subscriber,
+                sessions: HashMap::new(),
+            }
+        })
+    }
+
+    fn send_to_client(&self, id: usize, msg: OutgoingMessage) {
+        if let Some(addr) = self.sessions.get(&id) {
+            addr.do_send(msg);
+        }
+    }
 }
 
 /// Make actor from `Server`
@@ -24,7 +73,7 @@ impl Actor for Server {
 /// Register new session and assign unique id to this session
 impl Handler<Connect> for Server {
     type Result = usize;
-    fn handle(&mut self, msg: Connect, _ctx: &mut Context<Self>) -> Self::Result {
+    fn handle(&mut self, msg: Connect, _ctx: &mut Self::Context) -> Self::Result {
         if self.id == usize::MAX {
             self.id = 0;
         }
@@ -39,7 +88,7 @@ impl Handler<Connect> for Server {
 impl Handler<Disconnect> for Server {
     type Result = ();
 
-    fn handle(&mut self, msg: Disconnect, _: &mut Context<Self>) {
+    fn handle(&mut self, msg: Disconnect, _: &mut Self::Context) {
         // remove address
         self.sessions.remove(&msg.id);
     }
@@ -48,12 +97,46 @@ impl Handler<Disconnect> for Server {
 /// Handler for Message message.
 impl Handler<ClientMessage> for Server {
     type Result = ();
-    fn handle(&mut self, _msg: ClientMessage, _: &mut Context<Self>) {}
+    fn handle(&mut self, msg: ClientMessage, _: &mut Self::Context) {
+        match msg.msg {
+            IncomingMessage::Event { event } => {
+                self.writer.do_send(WriteEvent { id: msg.id, event })
+            }
+            IncomingMessage::Close { id } => self.subscriber.do_send(Unsubscribe {
+                id: msg.id,
+                sub_id: Some(id),
+            }),
+            IncomingMessage::Req(subscription) => {
+                self.reader.do_send(ReadEvent {
+                    id: msg.id,
+                    subscription: subscription.clone(),
+                });
+                self.subscriber.do_send(Subscribe {
+                    id: msg.id,
+                    subscription,
+                })
+            }
+            IncomingMessage::Unknown => {
+                self.send_to_client(msg.id, OutgoingMessage::notice("Unsupported message"));
+            }
+        }
+    }
+}
+
+impl Handler<WriteEventResult> for Server {
+    type Result = ();
+    fn handle(&mut self, _msg: WriteEventResult, _: &mut Self::Context) {}
+}
+
+impl Handler<ReadEventResult> for Server {
+    type Result = ();
+    fn handle(&mut self, _msg: ReadEventResult, _: &mut Self::Context) {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Setting;
     use anyhow::Result;
 
     #[derive(Default)]
@@ -67,10 +150,18 @@ mod tests {
         fn handle(&mut self, _msg: OutgoingMessage, _ctx: &mut Self::Context) {}
     }
 
+    fn db_path(p: &str) -> Result<tempfile::TempDir> {
+        Ok(tempfile::Builder::new()
+            .prefix(&format!("nostr-relay-test-db-{}", p))
+            .tempdir()?)
+    }
+
     #[actix_rt::test]
     async fn connect() -> Result<()> {
-        let server = Server::start_default();
+        let db = Arc::new(Db::open(db_path("")?)?);
+        let server = Server::create_with(db, Setting::default_wrapper());
         let receiver = Receiver::start_default();
+
         let id = server
             .send(Connect {
                 addr: receiver.recipient(),

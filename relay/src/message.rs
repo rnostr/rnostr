@@ -1,6 +1,6 @@
 use actix::{Message, Recipient};
 use bytestring::ByteString;
-use nostr_db::{Event, Filter};
+use nostr_db::{CheckEventResult, Event, Filter};
 use serde::{
     de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer,
@@ -35,7 +35,7 @@ pub struct ClientMessage {
     pub msg: IncomingMessage,
 }
 
-/// parse incoming messages from a client
+/// Parsed incoming messages from a client
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "UPPERCASE", tag = "0")]
 pub enum IncomingMessage {
@@ -101,45 +101,105 @@ impl<'de> Deserialize<'de> for Subscription {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct OutgoingMessage(pub String);
-//  {
-//     /// message
-//     Notice(String),
-//     /// subscription id
-//     Eose(String),
-//     /// subscription id, event string
-//     Event(String, String),
-//     /// nip-20
-//     /// event id, saved, message
-//     Ok(String, bool, String),
-// }
+pub struct OutgoingMessage(pub String, pub Option<Event>);
+
 impl OutgoingMessage {
     pub fn notice(message: &str) -> Self {
-        Self(json!(["NOTICE", message]).to_string())
+        Self(json!(["NOTICE", message]).to_string(), None)
     }
+
     pub fn eose(sub_id: &str) -> Self {
-        Self(json!(["EOSE", sub_id]).to_string())
+        Self(format!(r#"["EOSE","{}"]"#, sub_id), None)
     }
+
     pub fn event(sub_id: &str, event: &str) -> Self {
-        Self(json!(["EVENT", sub_id, event]).to_string())
+        Self(format!(r#"["EVENT","{}",{}]"#, sub_id, event), None)
     }
 
     pub fn ok(event_id: &str, saved: bool, message: &str) -> Self {
-        Self(json!(["Ok", event_id, saved, message]).to_string())
+        Self(json!(["Ok", event_id, saved, message]).to_string(), None)
     }
 }
 
 impl Display for OutgoingMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)?;
+        if let Some(event) = &self.1 {
+            let msg = Self::event(&self.0, &event.to_string());
+            f.write_str(&msg.0)?;
+        } else {
+            f.write_str(&self.0)?;
+        }
         Ok(())
     }
 }
 
 impl Into<ByteString> for OutgoingMessage {
     fn into(self) -> ByteString {
-        ByteString::from(self.0)
+        if let Some(event) = &self.1 {
+            let msg = Self::event(&self.0, &event.to_string());
+            ByteString::from(msg.0)
+        } else {
+            ByteString::from(self.0)
+        }
     }
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct WriteEvent {
+    pub id: usize,
+    pub event: Event,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct WriteEventResult {
+    pub id: usize,
+    pub event: Event,
+    pub result: CheckEventResult,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct ReadEvent {
+    pub id: usize,
+    pub subscription: Subscription,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct ReadEventResult {
+    pub id: usize,
+    pub sub_id: String,
+    pub msg: OutgoingMessage,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct Subscribe {
+    pub id: usize,
+    pub subscription: Subscription,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct Unsubscribe {
+    pub id: usize,
+    pub sub_id: Option<String>,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct Dispatch {
+    pub id: usize,
+    pub event: Event,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct SubscribeResult {
+    pub id: usize,
+    pub event: Event,
 }
 
 #[cfg(test)]
@@ -190,12 +250,16 @@ mod tests {
         let msg = OutgoingMessage::notice("hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["NOTICE","hello"]"#);
-        let msg = OutgoingMessage::event("id", "event");
+        let msg = OutgoingMessage::event("id", r#"{"id":"1"}"#);
         let json = msg.to_string();
-        assert_eq!(json, r#"["EVENT","id","event"]"#);
+        assert_eq!(json, r#"["EVENT","id",{"id":"1"}]"#);
         let msg = OutgoingMessage::eose("hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["EOSE","hello"]"#);
+        let event = Event::default();
+        let msg = OutgoingMessage("id".to_owned(), Some(event));
+        let json = msg.to_string();
+        assert!(json.starts_with(r#"["EVENT","id",{"#));
         Ok(())
     }
 }
