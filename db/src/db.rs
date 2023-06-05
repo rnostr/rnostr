@@ -302,6 +302,7 @@ fn get_uid<K: AsRef<[u8]>, T: Transaction>(
     // Ok(None)
 }
 
+#[derive(Debug, Clone)]
 pub enum CheckEventResult {
     Invald(String),
     Duplicate,
