@@ -32,8 +32,9 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
 
+#[derive(Clone)]
 pub struct Db {
-    inner: Arc<Lmdb>,
+    inner: Lmdb,
     // save data
     t_data: Tree,
     // save index
@@ -344,7 +345,7 @@ impl Db {
             t_expiration: inner.open_tree(Some("t_expiration"), integer_index_opts)?,
             t_word: inner.open_tree(Some("t_word"), index_opts)?,
 
-            inner: Arc::new(inner),
+            inner,
         })
     }
 
