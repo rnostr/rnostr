@@ -85,7 +85,10 @@ pub struct AppData {
 }
 
 impl AppData {
-    pub fn create<P: AsRef<Path>>(db_path: Option<P>) -> Result<Self> {
+    pub fn create<P: AsRef<Path>>(
+        db_path: Option<P>,
+        prometheus_handle: PrometheusHandle,
+    ) -> Result<Self> {
         let setting = Setting::default_wrapper();
 
         let r = setting.read();
@@ -95,10 +98,6 @@ impl AppData {
         drop(r);
         let db = Arc::new(Db::open(path)?);
 
-        let builder = PrometheusBuilder::new();
-        let prometheus_handle = builder
-            .idle_timeout(MetricKindMask::ALL, Some(Duration::from_secs(10)))
-            .install_recorder()?;
         let server = Server::create_with(db, Arc::clone(&setting));
 
         Ok(Self {
@@ -107,6 +106,14 @@ impl AppData {
             prometheus_handle,
         })
     }
+}
+
+pub fn create_prometheus_handle() -> PrometheusHandle {
+    let builder = PrometheusBuilder::new();
+    builder
+        .idle_timeout(MetricKindMask::ALL, Some(Duration::from_secs(10)))
+        .install_recorder()
+        .unwrap()
 }
 
 pub fn create_app(
@@ -154,7 +161,7 @@ pub async fn start_app<A: ToSocketAddrs>(addrs: A, data: AppData) -> Result<(), 
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use actix_web::{
         dev::Service,
@@ -164,6 +171,10 @@ mod tests {
     use anyhow::Result;
     use bytes::Bytes;
     use futures_util::{SinkExt as _, StreamExt as _};
+    use lazy_static::lazy_static;
+    lazy_static! {
+        pub static ref PROMETHEUS_HANDLE: PrometheusHandle = create_prometheus_handle();
+    }
 
     fn db_path(p: &str) -> Result<tempfile::TempDir> {
         Ok(tempfile::Builder::new()
@@ -173,7 +184,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = AppData::create(Some(db_path("")?))?;
+        let data = AppData::create(Some(db_path("")?), PROMETHEUS_HANDLE.clone())?;
         let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
@@ -190,7 +201,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
-        let data = AppData::create(Some(db_path("")?))?;
+        let data = AppData::create(Some(db_path("")?), PROMETHEUS_HANDLE.clone())?;
         metrics::increment_counter!("test_metric");
 
         let app = init_service(create_app(data)).await;
@@ -206,7 +217,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = AppData::create(Some(db_path("")?))?;
+        let data = AppData::create(Some(db_path("")?), PROMETHEUS_HANDLE.clone())?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 

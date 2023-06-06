@@ -20,6 +20,7 @@ metrics-exporter-prometheus = { version = "0.12.1", default-features = false, fe
 metrics-util = "0.15.0"
 nostr-db = { path = "../db" }
 notify = "6.0.0"
+num_cpus = "1.15.0"
 parking_lot = "0.12.1"
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
@@ -33,4 +34,5 @@ actix-test = "0.1.1"
 anyhow = "1.0.70"
 bytes = "1.4.0"
 futures-util = "0.3.28"
+lazy_static = "1.4.0"
 tempfile = "3.4.0"

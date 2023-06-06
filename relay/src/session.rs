@@ -156,6 +156,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::tests::PROMETHEUS_HANDLE;
     use crate::create_app;
     use actix_rt::time::sleep;
     use actix_web_actors::ws;
@@ -171,7 +172,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn pingpong() -> Result<()> {
-        let data = AppData::create(Some(db_path("session")?))?;
+        let data = AppData::create(Some(db_path("session")?), PROMETHEUS_HANDLE.clone())?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
@@ -192,7 +193,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat() -> Result<()> {
-        let data = AppData::create(Some(db_path("session")?))?;
+        let data = AppData::create(Some(db_path("session")?), PROMETHEUS_HANDLE.clone())?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;
@@ -218,7 +219,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat_timeout() -> Result<()> {
-        let data = AppData::create(Some(db_path("session")?))?;
+        let data = AppData::create(Some(db_path("session")?), PROMETHEUS_HANDLE.clone())?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;
