@@ -24,22 +24,11 @@ impl Server {
         drop(r);
 
         Server::create(|ctx| {
-            let writer = Writer {
-                db: Arc::clone(&db),
-                addr: ctx.address().recipient(),
-                events: vec![],
-            }
-            .start();
-
+            let writer = Writer::new(Arc::clone(&db), ctx.address().recipient()).start();
             let subscriber = Subscriber::new(ctx.address().recipient()).start();
-
             let addr = ctx.address().recipient();
-
-            let reader = SyncArbiter::start(num, move || Reader {
-                db: Arc::clone(&db),
-                addr: addr.clone(),
-                subscriptions: vec![],
-            });
+            let reader =
+                SyncArbiter::start(num, move || Reader::new(Arc::clone(&db), addr.clone()));
 
             Server {
                 id: 0,
@@ -136,6 +125,7 @@ impl Handler<ReadEventResult> for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::temp_db_path;
     use crate::Setting;
     use anyhow::Result;
 
@@ -150,15 +140,9 @@ mod tests {
         fn handle(&mut self, _msg: OutgoingMessage, _ctx: &mut Self::Context) {}
     }
 
-    fn db_path(p: &str) -> Result<tempfile::TempDir> {
-        Ok(tempfile::Builder::new()
-            .prefix(&format!("nostr-relay-test-db-{}", p))
-            .tempdir()?)
-    }
-
     #[actix_rt::test]
     async fn connect() -> Result<()> {
-        let db = Arc::new(Db::open(db_path("")?)?);
+        let db = Arc::new(Db::open(temp_db_path("")?)?);
         let server = Server::create_with(db, Setting::default_wrapper());
         let receiver = Receiver::start_default();
 

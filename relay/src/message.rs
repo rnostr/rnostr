@@ -61,7 +61,7 @@ where
 }
 
 /// Subscription
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Subscription {
     pub id: String,
     pub filters: Vec<Filter>,

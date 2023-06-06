@@ -163,6 +163,7 @@ pub async fn start_app<A: ToSocketAddrs>(addrs: A, data: AppData) -> Result<(), 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::{temp_db_path, PROMETHEUS_HANDLE};
     use actix_web::{
         dev::Service,
         test::{init_service, read_body, TestRequest},
@@ -171,20 +172,10 @@ pub mod tests {
     use anyhow::Result;
     use bytes::Bytes;
     use futures_util::{SinkExt as _, StreamExt as _};
-    use lazy_static::lazy_static;
-    lazy_static! {
-        pub static ref PROMETHEUS_HANDLE: PrometheusHandle = create_prometheus_handle();
-    }
-
-    fn db_path(p: &str) -> Result<tempfile::TempDir> {
-        Ok(tempfile::Builder::new()
-            .prefix(&format!("nostr-relay-test-db-{}", p))
-            .tempdir()?)
-    }
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = AppData::create(Some(db_path("")?), PROMETHEUS_HANDLE.clone())?;
+        let data = AppData::create(Some(temp_db_path("")?), PROMETHEUS_HANDLE.clone())?;
         let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
@@ -201,7 +192,7 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
-        let data = AppData::create(Some(db_path("")?), PROMETHEUS_HANDLE.clone())?;
+        let data = AppData::create(Some(temp_db_path("")?), PROMETHEUS_HANDLE.clone())?;
         metrics::increment_counter!("test_metric");
 
         let app = init_service(create_app(data)).await;
@@ -217,7 +208,7 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = AppData::create(Some(db_path("")?), PROMETHEUS_HANDLE.clone())?;
+        let data = AppData::create(Some(temp_db_path("")?), PROMETHEUS_HANDLE.clone())?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
