@@ -1,6 +1,6 @@
 use crate::{message::*, setting::SettingWrapper, Reader, Subscriber, Writer};
 use actix::prelude::*;
-use nostr_db::Db;
+use nostr_db::{CheckEventResult, Db};
 use std::{collections::HashMap, sync::Arc};
 
 /// Server
@@ -52,8 +52,8 @@ impl Actor for Server {
     /// We are going to use simple Context, we just need ability to communicate
     /// with other actors.
     type Context = Context<Self>;
-    fn started(&mut self, _ctx: &mut Self::Context) {
-        // ctx.set_mailbox_capacity(1);
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.set_mailbox_capacity(10000);
     }
 }
 
@@ -86,7 +86,7 @@ impl Handler<Disconnect> for Server {
 /// Handler for Message message.
 impl Handler<ClientMessage> for Server {
     type Result = ();
-    fn handle(&mut self, msg: ClientMessage, _: &mut Self::Context) {
+    fn handle(&mut self, msg: ClientMessage, ctx: &mut Self::Context) {
         match msg.msg {
             IncomingMessage::Event { event } => {
                 self.writer.do_send(WriteEvent { id: msg.id, event })
@@ -96,14 +96,48 @@ impl Handler<ClientMessage> for Server {
                 sub_id: Some(id),
             }),
             IncomingMessage::Req(subscription) => {
-                self.reader.do_send(ReadEvent {
+                let session_id = msg.id;
+                let read_event = ReadEvent {
                     id: msg.id,
                     subscription: subscription.clone(),
-                });
-                self.subscriber.do_send(Subscribe {
-                    id: msg.id,
-                    subscription,
-                })
+                };
+                self.subscriber
+                    .send(Subscribe {
+                        id: msg.id,
+                        subscription,
+                    })
+                    .into_actor(self)
+                    .then(move |res, act, _ctx| {
+                        match res {
+                            Ok(res) => match res {
+                                Subscribed::Ok => {
+                                    act.reader.do_send(read_event);
+                                }
+                                Subscribed::Overlimit => {
+                                    act.send_to_client(
+                                        session_id,
+                                        OutgoingMessage::notice(
+                                            "Number of subscriptions exceeds limit",
+                                        ),
+                                    );
+                                }
+                                Subscribed::Duplicate => {
+                                    act.send_to_client(
+                                        session_id,
+                                        OutgoingMessage::notice("This subscription already exists"),
+                                    );
+                                }
+                            },
+                            Err(_err) => {
+                                act.send_to_client(
+                                    session_id,
+                                    OutgoingMessage::notice("Something is wrong"),
+                                );
+                            }
+                        }
+                        fut::ready(())
+                    })
+                    .wait(ctx);
             }
             IncomingMessage::Unknown => {
                 self.send_to_client(msg.id, OutgoingMessage::notice("Unsupported message"));
@@ -114,49 +148,130 @@ impl Handler<ClientMessage> for Server {
 
 impl Handler<WriteEventResult> for Server {
     type Result = ();
-    fn handle(&mut self, _msg: WriteEventResult, _: &mut Self::Context) {}
+    fn handle(&mut self, msg: WriteEventResult, _: &mut Self::Context) {
+        match msg {
+            WriteEventResult::Write { id, event, result } => {
+                let event_id = hex::encode(event.id());
+                let out_msg = match &result {
+                    CheckEventResult::Ok(_num) => OutgoingMessage::ok(&event_id, true, ""),
+                    CheckEventResult::Duplicate => {
+                        OutgoingMessage::ok(&event_id, true, "duplicate: event exists")
+                    }
+                    CheckEventResult::Invald(msg) => {
+                        OutgoingMessage::ok(&event_id, false, &format!("invalid: {}", msg))
+                    }
+                    CheckEventResult::Deleted => {
+                        OutgoingMessage::ok(&event_id, false, "deleted: user requested deletion")
+                    }
+                    CheckEventResult::ReplaceIgnored => {
+                        OutgoingMessage::ok(&event_id, false, "replaced: have newer event")
+                    }
+                };
+                self.send_to_client(id, out_msg);
+                // dispatch event to subscriber
+                if let CheckEventResult::Ok(_num) = result {
+                    self.subscriber.do_send(Dispatch { id, event });
+                }
+            }
+            WriteEventResult::Message { id, event: _, msg } => {
+                self.send_to_client(id, msg);
+            }
+        }
+    }
 }
 
 impl Handler<ReadEventResult> for Server {
     type Result = ();
-    fn handle(&mut self, _msg: ReadEventResult, _: &mut Self::Context) {}
+    fn handle(&mut self, msg: ReadEventResult, _: &mut Self::Context) {
+        self.send_to_client(msg.id, msg.msg);
+    }
 }
 
 impl Handler<SubscribeResult> for Server {
     type Result = ();
-    fn handle(&mut self, _msg: SubscribeResult, _: &mut Self::Context) {}
+    fn handle(&mut self, msg: SubscribeResult, _: &mut Self::Context) {
+        self.send_to_client(msg.id, msg.msg);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::temp_db_path;
-    use crate::Setting;
+    use crate::{temp_db_path, Setting};
+    use actix_rt::time::sleep;
     use anyhow::Result;
+    use nostr_db::Event;
+    use parking_lot::RwLock;
+    use std::{str::FromStr, time::Duration};
 
     #[derive(Default)]
-    struct Receiver;
+    struct Receiver(Arc<RwLock<Vec<OutgoingMessage>>>);
     impl Actor for Receiver {
         type Context = Context<Self>;
     }
 
     impl Handler<OutgoingMessage> for Receiver {
         type Result = ();
-        fn handle(&mut self, _msg: OutgoingMessage, _ctx: &mut Self::Context) {}
+        fn handle(&mut self, msg: OutgoingMessage, _ctx: &mut Self::Context) {
+            self.0.write().push(msg);
+        }
     }
 
     #[actix_rt::test]
-    async fn connect() -> Result<()> {
-        let db = Arc::new(Db::open(temp_db_path("")?)?);
-        let server = Server::create_with(db, Setting::default_wrapper());
-        let receiver = Receiver::start_default();
+    async fn put_get() -> Result<()> {
+        let db = Arc::new(Db::open(temp_db_path("server")?)?);
+        let note = r#"
+        {
+            "content": "Good morning everyone 😃",
+            "created_at": 1680690006,
+            "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d",
+            "kind": 1,
+            "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+            "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+            "tags": [["t", "nostr"]]
+          }
+        "#;
+        let event = Event::from_str(note)?;
+        // db.batch_put(vec![event])?;
 
-        let id = server
-            .send(Connect {
-                addr: receiver.recipient(),
-            })
-            .await?;
+        let receiver = Receiver::default();
+        let messages = receiver.0.clone();
+        let receiver = receiver.start();
+        let addr = receiver.recipient();
+
+        let server = Server::create_with(db, Setting::default_wrapper());
+
+        let id = server.send(Connect { addr }).await?;
         assert_eq!(id, 1);
+
+        // Unsupported
+        {
+            let text = r#"["UNKNOWN"]"#.to_owned();
+            let msg = serde_json::from_str::<IncomingMessage>(&text)?;
+            let client_msg = ClientMessage { id, text, msg };
+            server.send(client_msg).await?;
+            sleep(Duration::from_millis(50)).await;
+            let mut w = messages.write();
+            assert_eq!(w.len(), 1);
+            assert!(w.get(0).unwrap().0.contains("Unsupported"));
+            w.clear();
+        }
+
+        // Subscribe
+        {
+            let text = r#"["REQ", "1", {}]"#.to_owned();
+            let msg = serde_json::from_str::<IncomingMessage>(&text)?;
+            let client_msg = ClientMessage { id, text, msg };
+            server.send(client_msg).await?;
+            sleep(Duration::from_millis(50)).await;
+            {
+                let mut w = messages.write();
+                assert_eq!(w.len(), 1);
+                assert!(w.get(0).unwrap().0.contains("EOSE"));
+                w.clear();
+            }
+        }
+
         Ok(())
     }
 }
