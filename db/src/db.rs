@@ -307,7 +307,7 @@ pub enum CheckEventResult {
     Invald(String),
     Duplicate,
     Deleted,
-    RepaceIgnored,
+    ReplaceIgnored,
     Ok(usize),
 }
 
@@ -436,7 +436,7 @@ impl Db {
                 let e: Option<Event> = get_event_by_uid(writer, &self.t_data, &uid)?;
                 if let Some(e) = e {
                     if event.created_at() < e.created_at() {
-                        return Ok(CheckEventResult::RepaceIgnored);
+                        return Ok(CheckEventResult::ReplaceIgnored);
                     }
                     // del old
                     count += 1;
