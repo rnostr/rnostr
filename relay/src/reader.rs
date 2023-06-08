@@ -58,14 +58,13 @@ impl Handler<ReadEvent> for Reader {
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, time::Duration};
-
     use super::*;
     use crate::temp_db_path;
     use actix_rt::time::sleep;
     use anyhow::Result;
     use nostr_db::{Event, Filter};
     use parking_lot::RwLock;
+    use std::{str::FromStr, time::Duration};
 
     #[derive(Default)]
     struct Receiver(Arc<RwLock<Vec<ReadEventResult>>>);
