@@ -81,7 +81,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn connect() -> Result<()> {
+    async fn read() -> Result<()> {
         let db = Arc::new(Db::open(temp_db_path("reader")?)?);
         let note = r#"
         {

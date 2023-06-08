@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn connect() -> Result<()> {
+    async fn write() -> Result<()> {
         let db = Arc::new(Db::open(temp_db_path("writer")?)?);
         let note = r#"
         {
