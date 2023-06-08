@@ -61,7 +61,7 @@ where
 }
 
 /// Subscription
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Subscription {
     pub id: String,
     pub filters: Vec<Filter>,
@@ -99,6 +99,9 @@ impl<'de> Deserialize<'de> for Subscription {
     }
 }
 
+/// The message sent to the client, the first parameter is the message content,
+/// if the second parameter event is provided, then the first parameter is the subscription id.
+/// event to string has some time consumption, it is not desirable to convert this message when it is generated.
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct OutgoingMessage(pub String, pub Option<Event>);

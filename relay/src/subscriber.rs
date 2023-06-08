@@ -5,6 +5,7 @@ use nostr_db::Event;
 pub struct Subscriber {
     pub addr: Recipient<WriteEventResult>,
     pub events: Vec<(usize, Event)>,
+    pub subscriptions: Vec<(usize, Subscription)>,
 }
 
 impl Subscriber {
@@ -12,6 +13,7 @@ impl Subscriber {
         Self {
             addr,
             events: Vec::new(),
+            subscriptions: Vec::new(),
         }
     }
 }
