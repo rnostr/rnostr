@@ -51,7 +51,7 @@ impl Handler<ReadEvent> for Reader {
                 id: msg.id,
                 sub_id: msg.subscription.id,
                 msg: OutgoingMessage::notice("get event error"),
-            })
+            });
         }
     }
 }

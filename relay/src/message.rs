@@ -156,11 +156,23 @@ pub struct WriteEvent {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct WriteEventResult {
-    pub id: usize,
-    pub event: Event,
-    pub result: CheckEventResult,
+pub enum WriteEventResult {
+    Write {
+        id: usize,
+        event: Event,
+        result: CheckEventResult,
+    },
+    Message {
+        id: usize,
+        event: Event,
+        msg: OutgoingMessage,
+    },
 }
+// pub struct WriteEventResult {
+//     pub id: usize,
+//     pub event: Event,
+//     pub result: CheckEventResult,
+// }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
