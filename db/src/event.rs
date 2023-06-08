@@ -301,14 +301,14 @@ impl TryInto<String> for Event {
     }
 }
 
-pub trait FromEventJson: Sized {
+pub trait FromEventData: Sized {
     type Err: std::error::Error;
-    fn from_json<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err>;
+    fn from_data<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err>;
 }
 
-impl FromEventJson for String {
+impl FromEventData for String {
     type Err = Error;
-    fn from_json<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
+    fn from_data<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
         let (t, bytes) = parse_data_type(json.as_ref());
         if t == 1 {
             #[cfg(feature = "zstd")]
@@ -337,10 +337,10 @@ fn parse_data_type(json: &[u8]) -> (u8, &[u8]) {
     (0, json)
 }
 
-impl FromEventJson for Event {
+impl FromEventData for Event {
     type Err = Error;
     /// decode the json data to event object
-    fn from_json<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
+    fn from_data<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
         let (t, bytes) = parse_data_type(json.as_ref());
         if t == 1 {
             #[cfg(feature = "zstd")]

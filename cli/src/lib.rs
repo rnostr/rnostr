@@ -1,7 +1,7 @@
 use clap::Parser;
 use clio::{Input, Output};
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
-use nostr_db::{Db, Event, Filter, FromEventJson, Stats};
+use nostr_db::{Db, Event, Filter, FromEventData, Stats};
 use rayon::prelude::*;
 use std::{
     fs::File,
@@ -126,7 +126,7 @@ pub fn import<F: Fn(usize)>(
         batches
             .par_iter()
             .filter_map(|s| {
-                let event = Event::from_json(s.as_bytes());
+                let event = Event::from_data(s.as_bytes());
                 match event {
                     Ok(mut event) => {
                         if search {

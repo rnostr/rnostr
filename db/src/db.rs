@@ -1,7 +1,7 @@
 use crate::{
     error::Error,
     key::{concat, concat_sep, encode_replace_key, u64_to_ver, IndexKey},
-    ArchivedEventIndex, Event, EventIndex, Filter, FromEventJson, Stats,
+    ArchivedEventIndex, Event, EventIndex, Filter, FromEventData, Stats,
 };
 use nostr_kv::{
     lmdb::{Db as Lmdb, Iter as LmdbIter, *},
@@ -254,7 +254,7 @@ impl Db {
     }
 }
 
-fn get_event<R: FromEventJson, K: AsRef<[u8]>, T: Transaction>(
+fn get_event<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
     reader: &T,
     id_tree: &Tree,
     data_tree: &Tree,
@@ -270,7 +270,7 @@ fn get_event<R: FromEventJson, K: AsRef<[u8]>, T: Transaction>(
     Ok(None)
 }
 
-fn get_event_by_uid<R: FromEventJson, K: AsRef<[u8]>, T: Transaction>(
+fn get_event_by_uid<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
     reader: &T,
     data_tree: &Tree,
     uid: K,
@@ -278,7 +278,7 @@ fn get_event_by_uid<R: FromEventJson, K: AsRef<[u8]>, T: Transaction>(
     let v = reader.get(&data_tree, uid)?;
     if let Some(v) = v {
         return Ok(Some(
-            R::from_json(v.as_ref()).map_err(|e| Error::Message(e.to_string()))?,
+            R::from_data(v.as_ref()).map_err(|e| Error::Message(e.to_string()))?,
         ));
     }
     Ok(None)
@@ -453,7 +453,7 @@ impl Db {
         Ok(CheckEventResult::Ok(count))
     }
 
-    pub fn get<R: FromEventJson, K: AsRef<[u8]>, T: Transaction>(
+    pub fn get<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
         &self,
         txn: &T,
         event_id: K,
@@ -500,7 +500,7 @@ impl Db {
         Ok(count)
     }
 
-    pub fn batch_get<R: FromEventJson, II, N>(&self, event_ids: II) -> Result<Vec<R>>
+    pub fn batch_get<R: FromEventData, II, N>(&self, event_ids: II) -> Result<Vec<R>>
     where
         II: IntoIterator<Item = N>,
         N: AsRef<[u8]>,
@@ -529,7 +529,7 @@ impl Db {
         Ok(())
     }
 
-    pub fn iter<'txn, J: FromEventJson, T: Transaction>(
+    pub fn iter<'txn, J: FromEventData, T: Transaction>(
         &self,
         txn: &'txn T,
         filter: &Filter,
@@ -571,7 +571,7 @@ impl Db {
         }
     }
 
-    pub fn iter_expiration<'txn, J: FromEventJson, T: Transaction>(
+    pub fn iter_expiration<'txn, J: FromEventData, T: Transaction>(
         &self,
         txn: &'txn T,
         until: Option<u64>,
@@ -647,7 +647,7 @@ fn create_iter<'a, R: Transaction>(
 impl<'txn, R, J> Iter<'txn, R, J>
 where
     R: Transaction,
-    J: FromEventJson,
+    J: FromEventData,
 {
     fn new(
         kv_db: &Db,
@@ -1009,7 +1009,7 @@ where
 impl<'txn, R, J> Iter<'txn, R, J>
 where
     R: Transaction,
-    J: FromEventJson,
+    J: FromEventData,
 {
     pub fn stats(&self) -> Stats {
         Stats {
@@ -1056,7 +1056,7 @@ where
 impl<'txn, R, J> Iterator for Iter<'txn, R, J>
 where
     R: Transaction,
-    J: FromEventJson,
+    J: FromEventData,
 {
     type Item = Result<J, Error>;
     fn next(&mut self) -> Option<Self::Item> {

@@ -8,7 +8,7 @@ mod key;
 
 pub use {
     db::CheckEventResult, db::Db, db::Iter, error::Error, event::ArchivedEventIndex, event::Event,
-    event::EventIndex, event::FromEventJson, filter::Filter, filter::TagList,
+    event::EventIndex, event::FromEventData, filter::Filter, filter::TagList,
 };
 
 pub use nostr_kv as kv;
