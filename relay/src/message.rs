@@ -1,4 +1,4 @@
-use actix::{Message, Recipient};
+use actix::{Message, MessageResponse, Recipient};
 use bytestring::ByteString;
 use nostr_db::{CheckEventResult, Event, Filter};
 use serde::{
@@ -189,8 +189,15 @@ pub struct ReadEventResult {
     pub msg: OutgoingMessage,
 }
 
+#[derive(MessageResponse, Clone, Debug, PartialEq, Eq)]
+pub enum Subscribed {
+    Ok,
+    Overlimit,
+    Duplicate,
+}
+
 #[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
+#[rtype(result = "Subscribed")]
 pub struct Subscribe {
     pub id: usize,
     pub subscription: Subscription,
@@ -214,7 +221,8 @@ pub struct Dispatch {
 #[rtype(result = "()")]
 pub struct SubscribeResult {
     pub id: usize,
-    pub event: Event,
+    pub sub_id: String,
+    pub msg: OutgoingMessage,
 }
 
 #[cfg(test)]

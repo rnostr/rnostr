@@ -122,6 +122,11 @@ impl Handler<ReadEventResult> for Server {
     fn handle(&mut self, _msg: ReadEventResult, _: &mut Self::Context) {}
 }
 
+impl Handler<SubscribeResult> for Server {
+    type Result = ();
+    fn handle(&mut self, _msg: SubscribeResult, _: &mut Self::Context) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
