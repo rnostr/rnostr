@@ -200,9 +200,8 @@ mod tests {
     use crate::{temp_db_path, Setting};
     use actix_rt::time::sleep;
     use anyhow::Result;
-    use nostr_db::Event;
     use parking_lot::RwLock;
-    use std::{str::FromStr, time::Duration};
+    use std::time::Duration;
 
     #[derive(Default)]
     struct Receiver(Arc<RwLock<Vec<OutgoingMessage>>>);
@@ -231,8 +230,6 @@ mod tests {
             "tags": [["t", "nostr"]]
           }
         "#;
-        let event = Event::from_str(note)?;
-        // db.batch_put(vec![event])?;
 
         let receiver = Receiver::default();
         let messages = receiver.0.clone();
@@ -251,10 +248,12 @@ mod tests {
             let client_msg = ClientMessage { id, text, msg };
             server.send(client_msg).await?;
             sleep(Duration::from_millis(50)).await;
-            let mut w = messages.write();
-            assert_eq!(w.len(), 1);
-            assert!(w.get(0).unwrap().0.contains("Unsupported"));
-            w.clear();
+            {
+                let mut w = messages.write();
+                assert_eq!(w.len(), 1);
+                assert!(w.get(0).unwrap().0.contains("Unsupported"));
+                w.clear();
+            }
         }
 
         // Subscribe
@@ -268,6 +267,49 @@ mod tests {
                 let mut w = messages.write();
                 assert_eq!(w.len(), 1);
                 assert!(w.get(0).unwrap().0.contains("EOSE"));
+                w.clear();
+            }
+
+            // write
+            let text = format!(r#"["EVENT", {}]"#, note);
+            let msg = serde_json::from_str::<IncomingMessage>(&text)?;
+            let client_msg = ClientMessage { id, text, msg };
+            server.send(client_msg).await?;
+            sleep(Duration::from_millis(200)).await;
+            {
+                let mut w = messages.write();
+                assert_eq!(w.len(), 2);
+                assert!(w.get(0).unwrap().0.contains("Ok"));
+                assert!(w.get(1).unwrap().0.contains("EVENT"));
+                w.clear();
+            }
+            // unsubscribe
+
+            let text = r#"["CLOSE", "1"]"#.to_owned();
+            let msg = serde_json::from_str::<IncomingMessage>(&text)?;
+            let client_msg = ClientMessage { id, text, msg };
+            server.send(client_msg).await?;
+            sleep(Duration::from_millis(50)).await;
+            {
+                let mut w = messages.write();
+                // assert_eq!(w.len(), 1);
+                // assert!(w.get(0).unwrap().0.contains("EOSE"));
+                w.clear();
+            }
+        }
+
+        // get
+        {
+            let text = r#"["REQ", "1", {}]"#.to_owned();
+            let msg = serde_json::from_str::<IncomingMessage>(&text)?;
+            let client_msg = ClientMessage { id, text, msg };
+            server.send(client_msg).await?;
+            sleep(Duration::from_millis(50)).await;
+            {
+                let mut w = messages.write();
+                assert_eq!(w.len(), 2);
+                assert!(w.get(0).unwrap().0.contains("EVENT"));
+                assert!(w.get(1).unwrap().0.contains("EOSE"));
                 w.clear();
             }
         }
