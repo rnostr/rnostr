@@ -99,51 +99,39 @@ impl<'de> Deserialize<'de> for Subscription {
     }
 }
 
-/// The message sent to the client, the first parameter is the message content,
-/// if the second parameter event is provided, then the first parameter is the subscription id.
-/// event to string has some time consumption, it is not desirable to convert this message when it is generated.
+/// The message sent to the client
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct OutgoingMessage(pub String, pub Option<Event>);
+pub struct OutgoingMessage(pub String);
 
 impl OutgoingMessage {
     pub fn notice(message: &str) -> Self {
-        Self(json!(["NOTICE", message]).to_string(), None)
+        Self(json!(["NOTICE", message]).to_string())
     }
 
     pub fn eose(sub_id: &str) -> Self {
-        Self(format!(r#"["EOSE","{}"]"#, sub_id), None)
+        Self(format!(r#"["EOSE","{}"]"#, sub_id))
     }
 
     pub fn event(sub_id: &str, event: &str) -> Self {
-        Self(format!(r#"["EVENT","{}",{}]"#, sub_id, event), None)
+        Self(format!(r#"["EVENT","{}",{}]"#, sub_id, event))
     }
 
     pub fn ok(event_id: &str, saved: bool, message: &str) -> Self {
-        Self(json!(["Ok", event_id, saved, message]).to_string(), None)
+        Self(json!(["Ok", event_id, saved, message]).to_string())
     }
 }
 
 impl Display for OutgoingMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(event) = &self.1 {
-            let msg = Self::event(&self.0, &event.to_string());
-            f.write_str(&msg.0)?;
-        } else {
-            f.write_str(&self.0)?;
-        }
+        f.write_str(&self.0)?;
         Ok(())
     }
 }
 
 impl Into<ByteString> for OutgoingMessage {
     fn into(self) -> ByteString {
-        if let Some(event) = &self.1 {
-            let msg = Self::event(&self.0, &event.to_string());
-            ByteString::from(msg.0)
-        } else {
-            ByteString::from(self.0)
-        }
+        ByteString::from(self.0)
     }
 }
 
@@ -279,10 +267,10 @@ mod tests {
         let msg = OutgoingMessage::eose("hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["EOSE","hello"]"#);
-        let event = Event::default();
-        let msg = OutgoingMessage("id".to_owned(), Some(event));
-        let json = msg.to_string();
-        assert!(json.starts_with(r#"["EVENT","id",{"#));
+        // let event = Event::default();
+        // let msg = OutgoingMessage("id".to_owned(), Some(event));
+        // let json = msg.to_string();
+        // assert!(json.starts_with(r#"["EVENT","id",{"#));
         Ok(())
     }
 }
