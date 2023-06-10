@@ -3,7 +3,7 @@
 *.swp
 *.swo
 .DS_Store
-
+/data
 
 # Added by cargo
 #

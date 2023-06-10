@@ -1,4 +1,4 @@
-//! Nostr db cli
+//! Nostr cli
 use clap::Parser;
 #[macro_use]
 extern crate clap;
@@ -7,7 +7,7 @@ use nostr_cli::*;
 
 /// Cli
 #[derive(Debug, Parser)]
-#[command(name = "nostr-db", about = "Nostr db cli.", version)]
+#[command(name = "nostr-cli", about = "Nostr cli.", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -25,7 +25,7 @@ enum Commands {
     /// Benchmark filter
     #[command(arg_required_else_help = true)]
     Bench(BenchOpts),
-    /// Benchmark filter
+    /// Start nostr relay server
     #[command(arg_required_else_help = true)]
     Relay(RelayOpts),
 }

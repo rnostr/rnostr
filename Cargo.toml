@@ -1,3 +1,30 @@
+[package]
+name = "nostr-cli"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+path = "src/main.rs"
+name = "nostr-cli"
+
+[dependencies]
+anyhow = "1.0.70"
+clap = { version = "4.2.7", features = ["derive"] }
+clio = { version = "0.2.7", features = ["clap-parse"] }
+indicatif = "0.17.3"
+nostr-db = { path = "./db", features = ["search"]}
+nostr-relay = { path = "./relay"}
+rayon = "1.7.0"
+thiserror = "1.0.40"
+
+[features]
+zstd = ["nostr-db/zstd"]
+
 [workspace]
 
 members = [
@@ -5,7 +32,6 @@ members = [
     "kv/bench", 
     "db", 
     "db/bench", 
-    "cli", 
     "relay",
 ]
 
