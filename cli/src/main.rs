@@ -25,6 +25,9 @@ enum Commands {
     /// Benchmark filter
     #[command(arg_required_else_help = true)]
     Bench(BenchOpts),
+    /// Benchmark filter
+    #[command(arg_required_else_help = true)]
+    Relay(RelayOpts),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -39,6 +42,9 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Bench(opts) => {
             bench_opts(opts)?;
+        }
+        Commands::Relay(opts) => {
+            relay(&opts.config, opts.watch)?;
         }
     }
     Ok(())

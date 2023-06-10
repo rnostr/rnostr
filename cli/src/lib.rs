@@ -10,7 +10,10 @@ use std::{
 };
 
 mod bench;
+mod relay;
+
 pub use bench::*;
+pub use relay::*;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
