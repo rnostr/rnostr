@@ -35,6 +35,9 @@ const MAX_TAG_VALUE_SIZE: usize = 255;
 #[derive(Clone)]
 pub struct Db {
     inner: Lmdb,
+    #[allow(unused)]
+    // save meta data
+    t_meta: Tree,
     // save data
     t_data: Tree,
     // save index
@@ -318,7 +321,7 @@ impl Db {
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let inner = Lmdb::open(path)?;
+        let inner = Lmdb::open_with(path, Some(20), Some(100), Some(1_000_000_000_000), 0)?;
 
         let default_opts = 0;
         let integer_default_opts = ffi::MDB_INTEGERKEY;
@@ -328,10 +331,19 @@ impl Db {
         let integer_index_opts =
             ffi::MDB_DUPSORT | ffi::MDB_INTEGERKEY | ffi::MDB_DUPFIXED | ffi::MDB_INTEGERDUP;
 
-        let view_data = inner.open_tree(Some("t_data"), integer_default_opts)?;
+        let t_data = inner.open_tree(Some("t_data"), integer_default_opts)?;
+        let t_meta = inner.open_tree(Some("t_meta"), default_opts)?;
+        {
+            // initialize db version
+            let mut writer = inner.writer()?;
+            writer.put(&t_meta, "version", "1")?;
+            writer.commit()?;
+        }
+
         Ok(Self {
-            seq: Arc::new(AtomicU64::new(latest_seq(&inner, &view_data)?)),
-            t_data: view_data,
+            seq: Arc::new(AtomicU64::new(latest_seq(&inner, &t_data)?)),
+            t_data,
+            t_meta,
             t_index: inner.open_tree(Some("t_index"), integer_default_opts)?,
             t_id_uid: inner.open_tree(Some("t_id_uid"), default_opts)?,
             t_uid_word: inner.open_tree(Some("t_uid_word"), default_opts)?,
