@@ -4,6 +4,7 @@
 *.swo
 .DS_Store
 /data
+/nostr.toml
 
 # Added by cargo
 #

@@ -123,6 +123,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 let text = text.to_string();
                 let msg = serde_json::from_str::<IncomingMessage>(&text);
                 match msg {
+                    // TODO: validate, fill limit
                     Ok(msg) => {
                         self.server.do_send(ClientMessage {
                             id: self.id,
@@ -157,7 +158,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
 mod tests {
     use super::*;
     use crate::create_app;
-    use crate::{temp_db_path, PROMETHEUS_HANDLE};
+    use crate::create_test_app_data;
     use actix_rt::time::sleep;
     use actix_web_actors::ws;
     use anyhow::Result;
@@ -166,7 +167,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn pingpong() -> Result<()> {
-        let data = AppData::create(Some(temp_db_path("session")?), PROMETHEUS_HANDLE.clone())?;
+        let data = create_test_app_data("session")?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
@@ -187,7 +188,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat() -> Result<()> {
-        let data = AppData::create(Some(temp_db_path("session")?), PROMETHEUS_HANDLE.clone())?;
+        let data = create_test_app_data("session")?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;
@@ -213,7 +214,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat_timeout() -> Result<()> {
-        let data = AppData::create(Some(temp_db_path("session")?), PROMETHEUS_HANDLE.clone())?;
+        let data = create_test_app_data("session")?;
         {
             let mut w = data.setting.write();
             w.session.heartbeat_interval = 1;

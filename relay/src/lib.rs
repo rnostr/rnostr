@@ -45,3 +45,12 @@ lazy_static! {
     pub static ref PROMETHEUS_HANDLE: metrics_exporter_prometheus::PrometheusHandle =
         create_prometheus_handle();
 }
+
+#[cfg(test)]
+pub fn create_test_app_data(db_path: &str) -> anyhow::Result<AppData> {
+    Ok(AppData::create(
+        Setting::default_wrapper(),
+        Some(temp_db_path(db_path)?),
+        PROMETHEUS_HANDLE.clone(),
+    )?)
+}

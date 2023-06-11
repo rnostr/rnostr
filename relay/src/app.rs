@@ -1,4 +1,4 @@
-use crate::{Result, Server, Setting};
+use crate::{setting::SettingWrapper, Result, Server, Setting};
 use actix::Addr;
 use actix_cors::Cors;
 use actix_web::{
@@ -10,7 +10,7 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::MetricKindMask;
 use nostr_db::Db;
 use parking_lot::RwLock;
-use std::{net::ToSocketAddrs, path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 pub mod route {
     use crate::{AppData, Session};
@@ -77,6 +77,7 @@ pub mod route {
     }
 }
 
+/// App data
 #[derive(Clone)]
 pub struct AppData {
     pub server: Addr<Server>,
@@ -85,12 +86,12 @@ pub struct AppData {
 }
 
 impl AppData {
+    /// db_path: overwrite setting db path
     pub fn create<P: AsRef<Path>>(
+        setting: SettingWrapper,
         db_path: Option<P>,
         prometheus_handle: PrometheusHandle,
     ) -> Result<Self> {
-        let setting = Setting::default_wrapper();
-
         let r = setting.read();
         let path = db_path
             .map(|p| p.as_ref().to_path_buf())
@@ -141,29 +142,26 @@ pub fn create_app(
         )
 }
 
-pub async fn start_app<A: ToSocketAddrs>(addrs: A, data: AppData) -> Result<(), std::io::Error> {
-    // start server actor
-    // let server = Server::default().start();
+pub fn start_app(data: AppData) -> Result<actix_server::Server, std::io::Error> {
     let r = data.setting.read();
     let num = if r.thread.reader == 0 {
         num_cpus::get()
     } else {
         r.thread.reader
     };
+    let host = r.network.host.clone();
+    let port = r.network.port;
     drop(r);
-    HttpServer::new(move || create_app(data.clone()))
+    Ok(HttpServer::new(move || create_app(data.clone()))
         .workers(num)
-        .bind(addrs)?
-        .run()
-        .await?;
-    //TODO: save db
-    Ok(())
+        .bind((host, port))?
+        .run())
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::{temp_db_path, PROMETHEUS_HANDLE};
+    use crate::create_test_app_data;
     use actix_web::{
         dev::Service,
         test::{init_service, read_body, TestRequest},
@@ -175,7 +173,7 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = AppData::create(Some(temp_db_path("")?), PROMETHEUS_HANDLE.clone())?;
+        let data = create_test_app_data("")?;
         let app = init_service(create_app(data)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
@@ -192,7 +190,7 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
-        let data = AppData::create(Some(temp_db_path("")?), PROMETHEUS_HANDLE.clone())?;
+        let data = create_test_app_data("")?;
         metrics::increment_counter!("test_metric");
 
         let app = init_service(create_app(data)).await;
@@ -208,7 +206,7 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = AppData::create(Some(temp_db_path("")?), PROMETHEUS_HANDLE.clone())?;
+        let data = create_test_app_data("")?;
 
         let mut srv = actix_test::start(move || create_app(data.clone()));
 

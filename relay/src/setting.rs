@@ -44,7 +44,7 @@ pub struct Db {
 impl Default for Db {
     fn default() -> Self {
         Self {
-            path: PathBuf::from("./db"),
+            path: PathBuf::from("./data/db"),
         }
     }
 }
@@ -64,12 +64,31 @@ impl Default for Thread {
     }
 }
 
+/// network config
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Network {
+    /// server bind host
+    pub host: String,
+    /// server bind port
+    pub port: u16,
+}
+
+impl Default for Network {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 7707,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Setting {
     pub information: Information,
     pub session: Session,
     pub db: Db,
     pub thread: Thread,
+    pub network: Network,
 }
 
 pub type SettingWrapper = Arc<RwLock<Setting>>;
@@ -82,6 +101,10 @@ impl Setting {
     /// information json
     pub fn render_information(&self) -> Result<String> {
         Ok(serde_json::to_string_pretty(&self.information)?)
+    }
+
+    pub fn read_wrapper<P: AsRef<Path>>(file: P) -> Result<SettingWrapper> {
+        Ok(Arc::new(RwLock::new(Self::read(file)?)))
     }
 
     pub fn read<P: AsRef<Path>>(file: P) -> Result<Self> {

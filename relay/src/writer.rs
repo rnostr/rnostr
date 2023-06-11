@@ -61,14 +61,14 @@ const WRITE_INTERVAL: u64 = 100;
 impl Actor for Writer {
     type Context = Context<Self>;
     fn started(&mut self, ctx: &mut Self::Context) {
-        info!("Actor writer started {:?}", ctx.address());
+        info!("Actor writer started");
         ctx.run_interval(Duration::from_millis(WRITE_INTERVAL), |act, _ctx| {
             act.do_write();
         });
     }
 
-    fn stopped(&mut self, ctx: &mut Self::Context) {
-        info!("Actor writer stop {:?}", ctx.address());
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        info!("Actor writer stop");
         self.do_write();
     }
 }
