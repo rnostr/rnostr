@@ -2,6 +2,7 @@ use crate::{message::*, setting::SettingWrapper, Reader, Subscriber, Writer};
 use actix::prelude::*;
 use nostr_db::{CheckEventResult, Db};
 use std::{collections::HashMap, sync::Arc};
+use tracing::info;
 
 /// Server
 #[derive(Debug)]
@@ -27,6 +28,7 @@ impl Server {
             let writer = Writer::new(Arc::clone(&db), ctx.address().recipient()).start();
             let subscriber = Subscriber::new(ctx.address().recipient()).start();
             let addr = ctx.address().recipient();
+            info!("starting {} reader workers", num);
             let reader =
                 SyncArbiter::start(num, move || Reader::new(Arc::clone(&db), addr.clone()));
 
@@ -54,6 +56,7 @@ impl Actor for Server {
     type Context = Context<Self>;
     fn started(&mut self, ctx: &mut Self::Context) {
         ctx.set_mailbox_capacity(10000);
+        info!("Actor server started");
     }
 }
 

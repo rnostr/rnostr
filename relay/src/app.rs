@@ -11,6 +11,7 @@ use metrics_util::MetricKindMask;
 use nostr_db::Db;
 use parking_lot::RwLock;
 use std::{path::Path, sync::Arc, time::Duration};
+use tracing::info;
 
 pub mod route {
     use crate::{AppData, Session};
@@ -152,6 +153,7 @@ pub fn start_app(data: AppData) -> Result<actix_server::Server, std::io::Error> 
     let host = r.network.host.clone();
     let port = r.network.port;
     drop(r);
+    info!("Start http server {}:{}", host, port);
     Ok(HttpServer::new(move || create_app(data.clone()))
         .workers(num)
         .bind((host, port))?

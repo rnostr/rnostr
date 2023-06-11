@@ -68,7 +68,7 @@ impl Actor for Writer {
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
-        info!("Actor writer stop");
+        info!("Actor writer stopped");
         self.do_write();
     }
 }

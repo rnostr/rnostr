@@ -138,12 +138,12 @@ impl Setting {
                     if event.kind.is_modify() {
                         match Self::read(&c_file) {
                             Ok(new_setting) => {
-                                info!("Reload setting success {:?}", c_file);
+                                info!("Reload config success {:?}", c_file);
                                 let mut w = c_setting.write();
                                 *w = new_setting;
                             }
                             Err(e) => {
-                                error!(error = e.to_string(), "failed to reload setting {:?}", c_file);
+                                error!(error = e.to_string(), "failed to reload config {:?}", c_file);
                             }
                         }
                     }
