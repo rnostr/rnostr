@@ -1,7 +1,9 @@
 use crate::{message::*, AppData, Server};
 use actix::prelude::*;
 use actix_web_actors::ws;
+use metrics::{decrement_gauge, increment_counter, increment_gauge};
 use std::time::{Duration, Instant};
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct Session {
@@ -71,6 +73,9 @@ impl Actor for Session {
 
     /// Method is called on actor start. We start the heartbeat process here.
     fn started(&mut self, ctx: &mut Self::Context) {
+        increment_counter!("new_connections");
+        increment_gauge!("current_connections", 1.0);
+
         // we'll start heartbeat process on session start.
         self.hb(ctx);
         // register self in server.
@@ -82,7 +87,10 @@ impl Actor for Session {
             .into_actor(self)
             .then(|res, act, ctx| {
                 match res {
-                    Ok(res) => act.id = res,
+                    Ok(res) => {
+                        act.id = res;
+                        debug!("Session started {:?} {:?}", act.id, act.ip);
+                    }
                     // something is wrong with server
                     _ => ctx.stop(),
                 }
@@ -97,13 +105,16 @@ impl Actor for Session {
         Running::Stop
     }
 
-    fn stopped(&mut self, _ctx: &mut Self::Context) {}
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        decrement_gauge!("current_connections", 1.0);
+        debug!("Session stopped {:?} {:?}", self.id, self.ip);
+    }
 }
 
 /// Handler for `ws::Message`
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        // debug!("WEBSOCKET MESSAGE: {msg:?}");
+        debug!("Session message {:?} {:?} {:?}", self.id, self.ip, msg);
         let msg = match msg {
             Err(_err) => {
                 ctx.stop();

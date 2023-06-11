@@ -6,11 +6,11 @@ use actix_web::{
     dev::{ServiceFactory, ServiceRequest},
     web, App, HttpServer,
 };
+use metrics::describe_counter;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use metrics_util::MetricKindMask;
 use nostr_db::Db;
 use parking_lot::RwLock;
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc};
 use tracing::info;
 
 pub mod route {
@@ -18,7 +18,6 @@ pub mod route {
     use actix_http::header::{ACCEPT, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
-    use tracing::debug;
 
     pub async fn websocket(
         req: HttpRequest,
@@ -35,7 +34,6 @@ pub mod route {
         } else {
             req.peer_addr().map(|a| a.to_string())
         };
-        debug!("Open connection from {:?}", ip);
         ws::start(
             Session::new(ip.unwrap_or_default(), data.get_ref()),
             &req,
@@ -119,7 +117,10 @@ impl AppData {
 pub fn create_prometheus_handle() -> PrometheusHandle {
     let builder = PrometheusBuilder::new();
     builder
-        .idle_timeout(MetricKindMask::ALL, Some(Duration::from_secs(10)))
+        // .idle_timeout(
+        //     metrics_util::MetricKindMask::ALL,
+        //     Some(std::time::Duration::from_secs(10)),
+        // )
         .install_recorder()
         .unwrap()
 }
@@ -150,6 +151,8 @@ pub fn create_app(
 }
 
 pub fn start_app(data: AppData) -> Result<actix_server::Server, std::io::Error> {
+    describe_metrics();
+
     let r = data.setting.read();
     let num = if r.thread.reader == 0 {
         num_cpus::get()
@@ -164,6 +167,11 @@ pub fn start_app(data: AppData) -> Result<actix_server::Server, std::io::Error> 
         .workers(num)
         .bind((host, port))?
         .run())
+}
+
+pub fn describe_metrics() {
+    describe_counter!("new_connections", "The total count of new connections");
+    describe_counter!("current_connections", "The number of current connections");
 }
 
 #[cfg(test)]
