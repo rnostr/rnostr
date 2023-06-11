@@ -32,7 +32,7 @@ pub mod route {
                 Some(val.to_string())
             })
         } else {
-            req.peer_addr().map(|a| a.to_string())
+            req.peer_addr().map(|a| a.ip().to_string())
         };
         ws::start(
             Session::new(ip.unwrap_or_default(), data.get_ref()),
