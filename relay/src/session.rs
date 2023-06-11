@@ -34,8 +34,8 @@ impl Session {
             ip,
             hb: Instant::now(),
             server: data.server.clone(),
-            heartbeat_timeout: Duration::from_secs(setting.session.heartbeat_timeout),
-            heartbeat_interval: Duration::from_secs(setting.session.heartbeat_interval),
+            heartbeat_timeout: Duration::from_secs(setting.network.heartbeat_timeout),
+            heartbeat_interval: Duration::from_secs(setting.network.heartbeat_interval),
         }
     }
 
@@ -191,8 +191,8 @@ mod tests {
         let data = create_test_app_data("session")?;
         {
             let mut w = data.setting.write();
-            w.session.heartbeat_interval = 1;
-            w.session.heartbeat_timeout = 20;
+            w.network.heartbeat_interval = 1;
+            w.network.heartbeat_timeout = 20;
         }
         let mut srv = actix_test::start(move || create_app(data.clone()));
 
@@ -217,8 +217,8 @@ mod tests {
         let data = create_test_app_data("session")?;
         {
             let mut w = data.setting.write();
-            w.session.heartbeat_interval = 1;
-            w.session.heartbeat_timeout = 2;
+            w.network.heartbeat_interval = 1;
+            w.network.heartbeat_timeout = 2;
         }
         let mut srv = actix_test::start(move || create_app(data.clone()));
 

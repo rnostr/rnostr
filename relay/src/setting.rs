@@ -17,26 +17,6 @@ pub struct Information {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Session {
-    /// heartbeat timeout
-    /// How long before lack of client response causes a timeout
-    pub heartbeat_timeout: u64,
-
-    /// heartbeat interval
-    /// How often heartbeat pings are sent
-    pub heartbeat_interval: u64,
-}
-
-impl Default for Session {
-    fn default() -> Self {
-        Self {
-            heartbeat_interval: 60,
-            heartbeat_timeout: 120,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Db {
     pub path: PathBuf,
 }
@@ -71,6 +51,15 @@ pub struct Network {
     pub host: String,
     /// server bind port
     pub port: u16,
+    /// heartbeat timeout
+    /// How long before lack of client response causes a timeout
+    pub heartbeat_timeout: u64,
+
+    /// heartbeat interval
+    /// How often heartbeat pings are sent
+    pub heartbeat_interval: u64,
+
+    pub real_ip_header: Option<Vec<String>>,
 }
 
 impl Default for Network {
@@ -78,6 +67,9 @@ impl Default for Network {
         Self {
             host: "127.0.0.1".to_string(),
             port: 7707,
+            heartbeat_interval: 60,
+            heartbeat_timeout: 120,
+            real_ip_header: None,
         }
     }
 }
@@ -85,7 +77,6 @@ impl Default for Network {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Setting {
     pub information: Information,
-    pub session: Session,
     pub db: Db,
     pub thread: Thread,
     pub network: Network,

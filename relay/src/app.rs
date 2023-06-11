@@ -18,20 +18,26 @@ pub mod route {
     use actix_http::header::{ACCEPT, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
+    use tracing::debug;
 
     pub async fn websocket(
         req: HttpRequest,
         stream: web::Payload,
         data: web::Data<AppData>,
     ) -> Result<HttpResponse, Error> {
+        let r = data.setting.read();
+        let ip = if let Some(header) = &r.network.real_ip_header {
+            header.iter().find_map(|s| {
+                let hdr = req.headers().get(s)?.to_str().ok()?;
+                let val = hdr.split(',').next()?.trim();
+                Some(val.to_string())
+            })
+        } else {
+            req.peer_addr().map(|a| a.to_string())
+        };
+        debug!("Open connection from {:?}", ip);
         ws::start(
-            Session::new(
-                req.connection_info()
-                    .realip_remote_addr()
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_default(),
-                data.get_ref(),
-            ),
+            Session::new(ip.unwrap_or_default(), data.get_ref()),
             &req,
             stream,
         )
