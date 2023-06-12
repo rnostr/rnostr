@@ -51,7 +51,7 @@ pub struct Network {
     pub host: String,
     /// server bind port
     pub port: u16,
-    /// heartbeat timeout
+    /// heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
     /// How long before lack of client response causes a timeout
     pub heartbeat_timeout: u64,
 
