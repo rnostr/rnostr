@@ -1,43 +1,61 @@
-use crate::{message::*, AppData, Server};
+use crate::{message::*, App, Server};
 use actix::prelude::*;
+use actix_web::web;
 use actix_web_actors::ws;
 use metrics::{decrement_gauge, increment_counter, increment_gauge};
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tracing::debug;
 
-#[derive(Debug)]
 pub struct Session {
-    pub ip: String,
+    ip: String,
 
     /// unique session id
-    pub id: usize,
+    id: usize,
 
     /// Client must send ping at least once per 10 seconds (CLIENT_TIMEOUT),
     /// otherwise we drop connection.
-    pub hb: Instant,
+    hb: Instant,
 
     /// server
-    pub server: Addr<Server>,
+    server: Addr<Server>,
 
     /// heartbeat timeout
     /// How long before lack of client response causes a timeout
-    pub heartbeat_timeout: Duration,
+    heartbeat_timeout: Duration,
 
     /// heartbeat interval
     /// How often heartbeat pings are sent
-    pub heartbeat_interval: Duration,
+    heartbeat_interval: Duration,
+
+    app: web::Data<App>,
+
+    /// Simple store for save extension data
+    pub data: HashMap<String, String>,
 }
 
 impl Session {
-    pub fn new(ip: String, data: &AppData) -> Session {
-        let setting = data.setting.read();
+    /// Get session id
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn new(ip: String, app: web::Data<App>) -> Session {
+        let setting = app.setting.read();
+        let heartbeat_timeout = Duration::from_secs(setting.network.heartbeat_timeout);
+        let heartbeat_interval = Duration::from_secs(setting.network.heartbeat_interval);
+        drop(setting);
         Self {
             id: 0,
             ip,
             hb: Instant::now(),
-            server: data.server.clone(),
-            heartbeat_timeout: Duration::from_secs(setting.network.heartbeat_timeout),
-            heartbeat_interval: Duration::from_secs(setting.network.heartbeat_interval),
+            server: app.server.clone(),
+            heartbeat_timeout,
+            heartbeat_interval,
+            app,
+            data: HashMap::new(),
         }
     }
 
@@ -89,6 +107,7 @@ impl Actor for Session {
                 match res {
                     Ok(res) => {
                         act.id = res;
+                        act.app.clone().extensions.call_connected(act, ctx);
                         debug!("Session started {:?} {:?}", act.id, act.ip);
                     }
                     // something is wrong with server
@@ -105,8 +124,9 @@ impl Actor for Session {
         Running::Stop
     }
 
-    fn stopped(&mut self, _ctx: &mut Self::Context) {
+    fn stopped(&mut self, ctx: &mut Self::Context) {
         decrement_gauge!("current_connections", 1.0);
+        self.app.clone().extensions.call_disconnected(self, ctx);
         debug!("Session stopped {:?} {:?}", self.id, self.ip);
     }
 }
@@ -136,11 +156,22 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 match msg {
                     // TODO: validate, fill limit
                     Ok(msg) => {
-                        self.server.do_send(ClientMessage {
+                        let msg = ClientMessage {
                             id: self.id,
                             text,
                             msg,
-                        });
+                        };
+                        match self.app.clone().extensions.call_message(msg, self, ctx) {
+                            crate::ExtensionMessageResult::Continue(msg) => {
+                                self.server.do_send(msg);
+                            }
+                            crate::ExtensionMessageResult::Stop(out) => {
+                                ctx.text(out);
+                            }
+                            crate::ExtensionMessageResult::Ignore => {
+                                // ignore
+                            }
+                        };
                     }
                     Err(err) => {
                         ctx.text(OutgoingMessage::notice(&format!(
@@ -168,8 +199,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::create_app;
-    use crate::create_test_app_data;
+    use crate::{create_test_app, Extension, ExtensionMessageResult};
     use actix_rt::time::sleep;
     use actix_web_actors::ws;
     use anyhow::Result;
@@ -178,9 +208,10 @@ mod tests {
 
     #[actix_rt::test]
     async fn pingpong() -> Result<()> {
-        let data = create_test_app_data("session")?;
-
-        let mut srv = actix_test::start(move || create_app(data.clone()));
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("session").unwrap();
+            data.web_app()
+        });
 
         // client service
         let mut framed = srv.ws_at("/").await.unwrap();
@@ -199,13 +230,15 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat() -> Result<()> {
-        let data = create_test_app_data("session")?;
-        {
-            let mut w = data.setting.write();
-            w.network.heartbeat_interval = 1;
-            w.network.heartbeat_timeout = 20;
-        }
-        let mut srv = actix_test::start(move || create_app(data.clone()));
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("session").unwrap();
+            {
+                let mut w = data.setting.write();
+                w.network.heartbeat_interval = 1;
+                w.network.heartbeat_timeout = 20;
+            }
+            data.web_app()
+        });
 
         // client service
         let mut framed = srv.ws_at("/").await.unwrap();
@@ -225,14 +258,15 @@ mod tests {
 
     #[actix_rt::test]
     async fn heartbeat_timeout() -> Result<()> {
-        let data = create_test_app_data("session")?;
-        {
-            let mut w = data.setting.write();
-            w.network.heartbeat_interval = 1;
-            w.network.heartbeat_timeout = 2;
-        }
-        let mut srv = actix_test::start(move || create_app(data.clone()));
-
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("session").unwrap();
+            {
+                let mut w = data.setting.write();
+                w.network.heartbeat_interval = 1;
+                w.network.heartbeat_timeout = 2;
+            }
+            data.web_app()
+        });
         // client service
         let mut framed = srv.ws_at("/").await.unwrap();
 
@@ -241,6 +275,36 @@ mod tests {
         assert_eq!(item, ws::Frame::Ping(Bytes::copy_from_slice(b"")));
         let item = framed.next().await;
         assert!(item.is_none());
+        Ok(())
+    }
+
+    struct Ext;
+    impl Extension for Ext {
+        fn message(
+            &self,
+            _msg: ClientMessage,
+            _session: &mut Session,
+            _ctx: &mut <Session as actix::Actor>::Context,
+        ) -> ExtensionMessageResult {
+            ExtensionMessageResult::Stop(OutgoingMessage::notice("extension"))
+        }
+    }
+
+    #[actix_rt::test]
+    async fn extension() -> Result<()> {
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("session").unwrap();
+            data.add_extension(Ext).web_app()
+        });
+        let mut framed = srv.ws_at("/").await.unwrap();
+        framed
+            .send(ws::Message::Text(r#"["REQ", "1", {}]"#.into()))
+            .await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(
+            item,
+            ws::Frame::Text(Bytes::copy_from_slice(br#"["NOTICE","extension"]"#))
+        );
         Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use crate::Result;
 use clap::Parser;
-use nostr_relay::{create_prometheus_handle, start_app, AppData, Setting};
+use nostr_relay::{create_prometheus_handle, App, Setting};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -31,8 +31,8 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
     let prometheus_handle = create_prometheus_handle();
 
     actix_rt::System::new().block_on(async {
-        let app_data = AppData::create::<PathBuf>(r.0, None, prometheus_handle).unwrap();
-        start_app(app_data).unwrap().await.unwrap();
+        let app_data = App::create::<PathBuf>(r.0, None, prometheus_handle).unwrap();
+        app_data.web_server().unwrap().await.unwrap();
         info!("Relay server stopped");
     });
 

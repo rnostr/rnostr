@@ -19,6 +19,7 @@ impl actix_web::ResponseError for Error {}
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 mod app;
+mod extension;
 pub mod message;
 mod reader;
 mod server;
@@ -28,8 +29,8 @@ mod subscriber;
 mod writer;
 
 pub use {
-    app::*, reader::Reader, server::Server, server::*, session::Session, setting::Setting,
-    subscriber::Subscriber, writer::Writer,
+    app::*, extension::*, reader::Reader, server::Server, server::*, session::Session,
+    setting::Setting, subscriber::Subscriber, writer::Writer,
 };
 
 #[cfg(test)]
@@ -47,8 +48,8 @@ lazy_static! {
 }
 
 #[cfg(test)]
-pub fn create_test_app_data(db_path: &str) -> anyhow::Result<AppData> {
-    Ok(AppData::create(
+pub fn create_test_app(db_path: &str) -> anyhow::Result<App> {
+    Ok(App::create(
         Setting::default_wrapper(),
         Some(temp_db_path(db_path)?),
         PROMETHEUS_HANDLE.clone(),

@@ -1,10 +1,10 @@
-use crate::{setting::SettingWrapper, Result, Server, Setting};
+use crate::{setting::SettingWrapper, Extension, Extensions, Result, Server, Setting};
 use actix::Addr;
 use actix_cors::Cors;
 use actix_web::{
     body::MessageBody,
     dev::{ServiceFactory, ServiceRequest},
-    web, App, HttpServer,
+    web, App as WebApp, HttpServer,
 };
 use metrics::describe_counter;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -14,7 +14,7 @@ use std::{path::Path, sync::Arc};
 use tracing::info;
 
 pub mod route {
-    use crate::{AppData, Session};
+    use crate::{App, Session};
     use actix_http::header::{ACCEPT, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
@@ -22,7 +22,7 @@ pub mod route {
     pub async fn websocket(
         req: HttpRequest,
         stream: web::Payload,
-        data: web::Data<AppData>,
+        data: web::Data<App>,
     ) -> Result<HttpResponse, Error> {
         let r = data.setting.read();
         let ip = if let Some(header) = &r.network.real_ip_header {
@@ -34,17 +34,14 @@ pub mod route {
         } else {
             req.peer_addr().map(|a| a.ip().to_string())
         };
-        ws::start(
-            Session::new(ip.unwrap_or_default(), data.get_ref()),
-            &req,
-            stream,
-        )
+        drop(r);
+        ws::start(Session::new(ip.unwrap_or_default(), data), &req, stream)
     }
 
     pub async fn information(
         _req: HttpRequest,
         _stream: web::Payload,
-        data: web::Data<AppData>,
+        data: web::Data<App>,
     ) -> Result<HttpResponse, Error> {
         let r = data.setting.read();
         Ok(HttpResponse::Ok()
@@ -55,7 +52,7 @@ pub mod route {
     pub async fn index(
         req: HttpRequest,
         stream: web::Payload,
-        data: web::Data<AppData>,
+        data: web::Data<App>,
     ) -> Result<HttpResponse, Error> {
         let headers = req.headers();
         if headers.contains_key(UPGRADE) {
@@ -74,7 +71,7 @@ pub mod route {
     pub async fn metrics(
         _req: HttpRequest,
         _stream: web::Payload,
-        data: web::Data<AppData>,
+        data: web::Data<App>,
     ) -> Result<HttpResponse, Error> {
         Ok(HttpResponse::Ok()
             .insert_header(("Content-Type", "text/plain"))
@@ -82,15 +79,15 @@ pub mod route {
     }
 }
 
-/// App data
-#[derive(Clone)]
-pub struct AppData {
+/// App with data
+pub struct App {
     pub server: Addr<Server>,
     pub setting: Arc<RwLock<Setting>>,
     pub prometheus_handle: PrometheusHandle,
+    pub extensions: Extensions,
 }
 
-impl AppData {
+impl App {
     /// db_path: overwrite setting db path
     pub fn create<P: AsRef<Path>>(
         setting: SettingWrapper,
@@ -110,7 +107,47 @@ impl AppData {
             server,
             setting,
             prometheus_handle,
+            extensions: Extensions::default(),
         })
+    }
+
+    pub fn add_extension<E: Extension + 'static>(mut self, ext: E) -> Self {
+        self.extensions.add(ext);
+        self
+    }
+
+    pub fn web_app(
+        self,
+    ) -> WebApp<
+        impl ServiceFactory<
+            ServiceRequest,
+            Config = (),
+            Response = actix_web::dev::ServiceResponse<impl MessageBody>,
+            Error = actix_web::Error,
+            InitError = (),
+        >,
+    > {
+        create_app(web::Data::new(self))
+    }
+
+    pub fn web_server(self) -> Result<actix_server::Server, std::io::Error> {
+        describe_metrics();
+
+        let r = self.setting.read();
+        let num = if r.thread.reader == 0 {
+            num_cpus::get()
+        } else {
+            r.thread.reader
+        };
+        let host = r.network.host.clone();
+        let port = r.network.port;
+        drop(r);
+        info!("Start http server {}:{}", host, port);
+        let data = web::Data::new(self);
+        Ok(HttpServer::new(move || create_app(data.clone()))
+            .workers(num)
+            .bind((host, port))?
+            .run())
     }
 }
 
@@ -125,9 +162,9 @@ pub fn create_prometheus_handle() -> PrometheusHandle {
         .unwrap()
 }
 
-pub fn create_app(
-    data: AppData,
-) -> App<
+fn create_app(
+    data: web::Data<App>,
+) -> WebApp<
     impl ServiceFactory<
         ServiceRequest,
         Config = (),
@@ -136,8 +173,8 @@ pub fn create_app(
         InitError = (),
     >,
 > {
-    let app = App::new();
-    app.app_data(web::Data::new(data))
+    let app = WebApp::new();
+    app.app_data(data)
         .service(web::resource("/metrics").route(web::get().to(route::metrics)))
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(
@@ -150,25 +187,6 @@ pub fn create_app(
         )
 }
 
-pub fn start_app(data: AppData) -> Result<actix_server::Server, std::io::Error> {
-    describe_metrics();
-
-    let r = data.setting.read();
-    let num = if r.thread.reader == 0 {
-        num_cpus::get()
-    } else {
-        r.thread.reader
-    };
-    let host = r.network.host.clone();
-    let port = r.network.port;
-    drop(r);
-    info!("Start http server {}:{}", host, port);
-    Ok(HttpServer::new(move || create_app(data.clone()))
-        .workers(num)
-        .bind((host, port))?
-        .run())
-}
-
 pub fn describe_metrics() {
     describe_counter!("new_connections", "The total count of new connections");
     describe_counter!("current_connections", "The number of current connections");
@@ -176,8 +194,7 @@ pub fn describe_metrics() {
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::create_test_app_data;
+    use crate::create_test_app;
     use actix_web::{
         dev::Service,
         test::{init_service, read_body, TestRequest},
@@ -189,8 +206,8 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn relay_info() -> Result<()> {
-        let data = create_test_app_data("")?;
-        let app = init_service(create_app(data)).await;
+        let data = create_test_app("")?;
+        let app = init_service(data.web_app()).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
             .to_request();
@@ -206,10 +223,10 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
-        let data = create_test_app_data("")?;
+        let data = create_test_app("")?;
         metrics::increment_counter!("test_metric");
 
-        let app = init_service(create_app(data)).await;
+        let app = init_service(data.web_app()).await;
         let req = TestRequest::with_uri("/metrics").to_request();
         let res = app.call(req).await.unwrap();
         assert_eq!(res.status(), 200);
@@ -222,9 +239,10 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn connect_ws() -> Result<()> {
-        let data = create_test_app_data("")?;
-
-        let mut srv = actix_test::start(move || create_app(data.clone()));
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("").unwrap();
+            data.web_app()
+        });
 
         // client service
         let mut framed = srv.ws_at("/").await.unwrap();
