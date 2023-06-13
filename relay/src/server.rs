@@ -140,11 +140,8 @@ impl Handler<ClientMessage> for Server {
                     })
                     .wait(ctx);
             }
-            IncomingMessage::Unknown(cmd, _val) => {
-                self.send_to_client(
-                    msg.id,
-                    OutgoingMessage::notice(&format!("Unsupported command {}", cmd)),
-                );
+            _ => {
+                self.send_to_client(msg.id, OutgoingMessage::notice("Unsupported message"));
             }
         }
     }

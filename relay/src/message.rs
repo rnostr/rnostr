@@ -55,6 +55,10 @@ pub enum IncomingMessage {
     Event(Event),
     Close(String),
     Req(Subscription),
+    /// nip-42
+    Auth(Event),
+    /// nip-45
+    Count(Subscription),
     Unknown(String, Vec<Value>),
 }
 
@@ -96,6 +100,18 @@ impl<'de> Deserialize<'de> for IncomingMessage {
                         let r =
                             Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
                         Ok(IncomingMessage::Req(Subscription { id: t, filters: r }))
+                    }
+                    "AUTH" => Ok(IncomingMessage::Auth(
+                        seq.next_element()?
+                            .ok_or_else(|| de::Error::invalid_length(0, &self))?,
+                    )),
+                    "COUNT" => {
+                        let t = seq
+                            .next_element()?
+                            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                        let r =
+                            Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                        Ok(IncomingMessage::Count(Subscription { id: t, filters: r }))
                     }
                     _ => Ok(IncomingMessage::Unknown(
                         t.to_string(),
@@ -316,6 +332,24 @@ mod tests {
         // unknown
         let msg: IncomingMessage = serde_json::from_str(r#"["REQ1", "sub_id1", {}]"#)?;
         assert!(matches!(msg, IncomingMessage::Unknown(ref cmd, ref _val) if cmd == "REQ1"));
+
+        // auth
+        let msg: IncomingMessage = serde_json::from_str(
+            r#"["AUTH", {
+    "content": "Good morning everyone 😃",
+    "created_at": 1680690006,
+    "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d",
+    "kind": 1,
+    "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+    "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+    "tags": [["t", "nostr"], ["t", ""], ["expiration", "1"], ["delegation", "8e0d3d3eb2881ec137a11debe736a9086715a8c8beeeda615780064d68bc25dd"]]
+  }]"#,
+        )?;
+        assert!(matches!(msg, IncomingMessage::Auth( ref event ) if event.kind() == 1));
+
+        // count
+        let msg: IncomingMessage = serde_json::from_str(r#"["COUNT", "sub_id1", {}]"#)?;
+        assert!(matches!(msg, IncomingMessage::Count(sub) if sub.id == "sub_id1"));
 
         Ok(())
     }
