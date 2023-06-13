@@ -184,7 +184,6 @@ mod tests {
         let file = Builder::new()
             .prefix("nostr-relay-config-test-watch")
             .suffix(".toml")
-            .rand_bytes(0)
             .tempfile()?;
 
         let (setting, _watcher) = Setting::watch(&file)?;
