@@ -82,6 +82,7 @@ pub mod route {
 /// App with data
 pub struct App {
     pub server: Addr<Server>,
+    pub db: Arc<Db>,
     pub setting: Arc<RwLock<Setting>>,
     pub prometheus_handle: PrometheusHandle,
     pub extensions: Extensions,
@@ -101,11 +102,12 @@ impl App {
         drop(r);
         let db = Arc::new(Db::open(path)?);
 
-        let server = Server::create_with(db, Arc::clone(&setting));
+        let server = Server::create_with(db.clone(), Arc::clone(&setting));
 
         Ok(Self {
             server,
             setting,
+            db,
             prometheus_handle,
             extensions: Extensions::default(),
         })
