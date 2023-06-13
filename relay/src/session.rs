@@ -3,6 +3,7 @@ use actix::prelude::*;
 use actix_web::web;
 use actix_web_actors::ws;
 use metrics::{decrement_gauge, increment_counter, increment_gauge};
+use nostr_db::now;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -154,8 +155,24 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 let text = text.to_string();
                 let msg = serde_json::from_str::<IncomingMessage>(&text);
                 match msg {
-                    // TODO: validate, fill limit
-                    Ok(msg) => {
+                    // TODO: validate
+                    Ok(mut msg) => {
+                        match &mut msg {
+                            IncomingMessage::Event(event) => {
+                                if let Err(err) = event.validate(now(), None, None) {
+                                    ctx.text(OutgoingMessage::notice(&err.to_string()));
+                                    return;
+                                }
+                            }
+                            IncomingMessage::Req(sub) => {
+                                for f in &mut sub.filters {
+                                    // fill default limit
+                                    f.default_limit(500);
+                                }
+                            }
+                            _ => {}
+                        }
+
                         let msg = ClientMessage {
                             id: self.id,
                             text,

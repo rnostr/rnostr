@@ -132,7 +132,7 @@ pub fn decode_replace_key<'a>(
 ) -> Result<(&'a [u8], u64, &'a [u8], u64), Error> {
     let len = val.len();
     if len < 32 + 8 {
-        Err(Error::InvaldLength)
+        Err(Error::InvalidLength)
     } else {
         let pubkey = &val[0..32];
         let kind = u64::from_be_bytes(val[32..40].try_into()?);

@@ -112,7 +112,7 @@ impl TryFrom<_Filter> for Filter {
                             let h = hex::decode(&s)?;
                             if h.len() != 32 {
                                 // ignore
-                                return Err(Error::Invald("invalid e or p tag value".to_string()));
+                                return Err(Error::Invalid("invalid e or p tag value".to_string()));
                             } else {
                                 list.push(h);
                             }
@@ -183,6 +183,12 @@ impl Filter {
             if vec.len() > 0 {
                 self.words = Some(vec);
             }
+        }
+    }
+
+    pub fn default_limit(&mut self, limit: u64) {
+        if self.limit.is_none() {
+            self.limit = Some(limit);
         }
     }
 

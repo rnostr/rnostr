@@ -5,8 +5,15 @@ use rkyv::{
     vec::ArchivedVec, AlignedVec, Archive, Deserialize as RkyvDeserialize,
     Serialize as RkyvSerialize,
 };
+use secp256k1::{schnorr::Signature, Message, XOnlyPublicKey, SECP256K1};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, str::FromStr};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::{
+    fmt::Display,
+    str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(
     Serialize,
@@ -95,12 +102,12 @@ impl EventIndex {
                 if tag[0] == "expiration" {
                     expiration = Some(
                         u64::from_str(&tag[1])
-                            .map_err(|_| Error::Invald("invalid expiration".to_string()))?,
+                            .map_err(|_| Error::Invalid("invalid expiration".to_string()))?,
                     );
                 } else if tag[0] == "delegation" {
                     let h = hex::decode(&tag[1])?;
                     if h.len() != 32 {
-                        return Err(Error::Invald("invalid delegator length".to_string()));
+                        return Err(Error::Invalid("invalid delegator length".to_string()));
                     }
                     delegator = Some(h);
                 }
@@ -114,7 +121,7 @@ impl EventIndex {
                     if tag[0] == "e" || tag[0] == "p" {
                         let h = hex::decode(&tag[1])?;
                         if h.len() != 32 {
-                            return Err(Error::Invald("invalid e or p tag value".to_string()));
+                            return Err(Error::Invalid("invalid e or p tag value".to_string()));
                         }
                         v = h;
                     } else {
@@ -318,7 +325,7 @@ impl FromEventData for String {
             }
             #[cfg(not(feature = "zstd"))]
             {
-                Err(Error::Invald("Need zstd feature".to_owned()))
+                Err(Error::Invalid("Need zstd feature".to_owned()))
             }
         } else {
             Ok(unsafe { String::from_utf8_unchecked(bytes.to_vec()) })
@@ -350,7 +357,7 @@ impl FromEventData for Event {
             }
             #[cfg(not(feature = "zstd"))]
             {
-                Err(Error::Invald("Need zstd feature".to_owned()))
+                Err(Error::Invalid("Need zstd feature".to_owned()))
             }
         } else {
             Ok(serde_json::from_slice(bytes)?)
@@ -416,11 +423,166 @@ impl Event {
     }
 }
 
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+impl Event {
+    pub fn is_ephemeral(&self) -> bool {
+        let kind = self.kind();
+        kind >= 20_000 && kind < 30_000
+    }
+
+    pub fn is_expired(&self, now: u64) -> bool {
+        if let Some(exp) = self.index.expiration {
+            exp < now
+        } else {
+            false
+        }
+    }
+
+    pub fn hash(&self) -> Vec<u8> {
+        let json: Value = json!([
+            0,
+            hex::encode(self.pubkey()),
+            self.created_at(),
+            self.kind(),
+            self.tags(),
+            self.content()
+        ]);
+        let mut hasher = Sha256::new();
+        hasher.update(json.to_string());
+        hasher.finalize().to_vec()
+    }
+
+    pub fn verify_id(&self) -> bool {
+        &self.hash() == self.id()
+    }
+
+    pub fn verify_sign(&self) -> bool {
+        verify_sign(&self.sig, self.pubkey(), self.id()).is_ok()
+    }
+
+    /// check event created time newer than (now - older), older than (now + newer)
+    /// max_time_older_than_now
+    /// max_time_newer_than_now
+    pub fn verify_time(&self, now: u64, older: Option<u64>, newer: Option<u64>) -> bool {
+        let time = self.created_at();
+        if let Some(left) = older {
+            if time < now - left {
+                return false;
+            }
+        }
+
+        if let Some(right) = newer {
+            if time > now + right {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn verify_delegation(&self) -> Result<(), Error> {
+        if self.index.delegator.is_some() {
+            for tag in self.tags() {
+                if tag.len() == 4 && tag[0] == "delegation" {
+                    return verify_delegation(self, &tag[1], &tag[2], &tag[3]);
+                }
+            }
+            Err(Error::Invalid("error delegation arguments".to_owned()))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn validate(&self, now: u64, older: Option<u64>, newer: Option<u64>) -> Result<(), Error> {
+        if !self.verify_time(now, older, newer) {
+            return Err(Error::Invalid(
+                "event creation date is too far off".to_owned(),
+            ));
+        }
+
+        if self.is_expired(now) {
+            return Err(Error::Invalid("event is expired".to_owned()));
+        }
+
+        if !self.verify_id() {
+            return Err(Error::Invalid("bad event id".to_owned()));
+        }
+
+        if !self.verify_sign() {
+            return Err(Error::Invalid("signature is wrong".to_owned()));
+        }
+
+        self.verify_delegation()?;
+
+        Ok(())
+    }
+}
+
+fn verify_delegation(
+    event: &Event,
+    delegator: &String,
+    conditions: &String,
+    sig: &String,
+) -> Result<(), Error> {
+    let msg = format!(
+        "nostr:delegation:{}:{}",
+        hex::encode(event.pubkey()),
+        conditions
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(msg);
+    let token = hasher.finalize().to_vec();
+    verify_sign(&hex::decode(sig)?, &hex::decode(delegator)?, &token)?;
+    let time = event.created_at();
+    // check conditions
+    for cond in conditions.split("&") {
+        if let Some(kind) = cond.strip_prefix("kind=") {
+            let n = u64::from_str(kind)?;
+            if n != event.kind() {
+                return Err(Error::Invalid(format!(
+                    "event kind must be {}",
+                    event.kind()
+                )));
+            }
+        }
+        if let Some(t) = cond.strip_prefix("created_at<") {
+            let n = u64::from_str(t)?;
+            if time >= n {
+                return Err(Error::Invalid(format!(
+                    "event created_at must older than {}",
+                    n
+                )));
+            }
+        }
+        if let Some(t) = cond.strip_prefix("created_at>") {
+            let n = u64::from_str(t)?;
+            if time <= n {
+                return Err(Error::Invalid(format!(
+                    "event created_at must newer than {}",
+                    n
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn verify_sign(sig: &[u8], pk: &[u8], msg: &[u8]) -> Result<(), Error> {
+    let sig = Signature::from_slice(sig)?;
+    let pk = XOnlyPublicKey::from_slice(pk)?;
+    let msg = Message::from_slice(msg)?;
+    Ok(SECP256K1.verify_schnorr(&sig, &msg, &pk)?)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::EventIndex;
-
-    use super::Event;
+    use super::*;
     use anyhow::Result;
     use serde_json::Value;
     use std::str::FromStr;
@@ -546,6 +708,59 @@ mod tests {
         let event: Event = serde_json::from_str(note)?;
         assert_eq!(&event.content, "");
         assert_eq!(&event.tags, &Vec::<Vec<String>>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn verify() -> Result<()> {
+        let note = r#"
+        {"content":"bgQih8o+R83t00qvueD7twglJRvvabI+nDu+bTvRsAs=?iv=92TlqnpEeiUMzDtUxsZeUA==","created_at":1682257003,"id":"dba1951f0959dfea6e3123ad916d191a07b35392c4b541d4b4814e77113de14a","kind":4,"pubkey":"3f770d65d3a764a9c5cb503ae123e62ec7598ad035d836e2a810f3877a745b24","sig":"15dcc89bca7d037d6a5282c1e63ea40ca4f76d81821ca1260898a324c99516a0cb577617cf18a3febe6303ed32e7a1a08382eecde5a7183195ca8f186a0cb037","tags":[["p","6efb74e66b7ed7fb9fb7b8b8f12e1fbbabe7f45823a33a14ac60cc9241285536"]]}
+        "#;
+        let event: Event = serde_json::from_str(note)?;
+        assert!(event.verify_sign());
+        assert!(event.verify_id());
+        assert!(!event.is_expired(now()));
+        assert!(!event.is_ephemeral());
+
+        let note = r#"
+        {"content":"{\"display_name\": \"maglevclient\", \"uptime\": 103180, \"maglev\": \"1a98030114cf\"}","created_at":1682258083,"id":"153a480d7bb9d7564147241b330a8667b19c3f9178b8179e64bf57f200654cb0","kind":0,"pubkey":"fb7324a1b807b48756be8df06bd9ccf11741a9678b120e91e044b5137734dcb2","sig":"08c0ffa072fd49f405df467ccab25152a54073fc0639ea0952e1eabff7962e008c54cb8f4d2d55dc4398703df4a5654d2ae3e93f68a801bcbabcdb8050a918ef","tags":[["t","TESTmaglev"],["expiration","1682258683"]]}      
+          "#;
+        let event: Event = serde_json::from_str(note)?;
+        assert!(event.verify_sign());
+        assert!(event.verify_id());
+        assert!(event.is_expired(now()));
+
+        let event = Event::new(vec![], vec![], 10, 1, vec![], "".to_string(), vec![])?;
+        assert!(event.verify_time(10, Some(1), Some(1)));
+        assert!(!event.verify_time(20, Some(1), Some(1)));
+        assert!(!event.verify_time(5, Some(1), Some(1)));
+
+        let note = r#"
+        {
+            "id": "e93c6095c3db1c31d15ac771f8fc5fb672f6e52cd25505099f62cd055523224f",
+            "pubkey": "477318cfb5427b9cfc66a9fa376150c1ddbc62115ae27cef72417eb959691396",
+            "created_at": 1677426298,
+            "kind": 1,
+            "tags": [
+              [
+                "delegation",
+                "8e0d3d3eb2881ec137a11debe736a9086715a8c8beeeda615780064d68bc25dd",
+                "kind=1&created_at>1674834236&created_at<1677426236",
+                "6f44d7fe4f1c09f3954640fb58bd12bae8bb8ff4120853c4693106c82e920e2b898f1f9ba9bd65449a987c39c0423426ab7b53910c0c6abfb41b30bc16e5f524"
+              ]
+            ],
+            "content": "Hello, world!",
+            "sig": "633db60e2e7082c13a47a6b19d663d45b2a2ebdeaf0b4c35ef83be2738030c54fc7fd56d139652937cdca875ee61b51904a1d0d0588a6acd6168d7be2909d693"
+          }
+        "#;
+        let event: Event = serde_json::from_str(note)?;
+        assert!(event.verify_delegation().is_err());
+        assert!(event
+            .verify_delegation()
+            .unwrap_err()
+            .to_string()
+            .contains("older"));
+
         Ok(())
     }
 }
