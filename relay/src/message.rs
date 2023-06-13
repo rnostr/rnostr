@@ -5,7 +5,7 @@ use serde::{
     de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use std::fmt::Display;
 use std::{fmt, marker::PhantomData};
 
@@ -35,30 +35,89 @@ pub struct ClientMessage {
     pub msg: IncomingMessage,
 }
 
+// #[derive(Deserialize, Clone, Debug)]
+// #[serde(rename_all = "UPPERCASE", tag = "0")]
+// pub enum IncomingMessage {
+//     Event {
+//         event: Event,
+//     },
+//     Close {
+//         id: String,
+//     },
+//     Req(Subscription),
+//     #[serde(other, deserialize_with = "ignore_contents")]
+//     Unknown,
+// }
+
 /// Parsed incoming messages from a client
-#[derive(Deserialize, Clone, Debug)]
-#[serde(rename_all = "UPPERCASE", tag = "0")]
+#[derive(Clone, Debug)]
 pub enum IncomingMessage {
-    Event {
-        event: Event,
-    },
-    Close {
-        id: String,
-    },
+    Event(Event),
+    Close(String),
     Req(Subscription),
-    #[serde(other, deserialize_with = "ignore_contents")]
-    Unknown,
+    Unknown(String, Vec<Value>),
 }
 
-fn ignore_contents<'de, D>(deserializer: D) -> Result<(), D::Error>
-where
-    D: Deserializer<'de>,
-{
-    // Ignore any content at this part of the json structure
-    let _ = deserializer.deserialize_ignored_any(serde::de::IgnoredAny);
-    // Return unit as our 'Unknown' variant has no args
-    Ok(())
+// https://github.com/serde-rs/serde/issues/1337
+impl<'de> Deserialize<'de> for IncomingMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MessageVisitor(PhantomData<()>);
+
+        impl<'de> Visitor<'de> for MessageVisitor {
+            type Value = IncomingMessage;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("sequence")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let t: &str = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                match t {
+                    "EVENT" => Ok(IncomingMessage::Event(
+                        seq.next_element()?
+                            .ok_or_else(|| de::Error::invalid_length(0, &self))?,
+                    )),
+                    "CLOSE" => Ok(IncomingMessage::Close(
+                        seq.next_element()?
+                            .ok_or_else(|| de::Error::invalid_length(0, &self))?,
+                    )),
+                    "REQ" => {
+                        let t = seq
+                            .next_element()?
+                            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                        let r =
+                            Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                        Ok(IncomingMessage::Req(Subscription { id: t, filters: r }))
+                    }
+                    _ => Ok(IncomingMessage::Unknown(
+                        t.to_string(),
+                        Vec::<Value>::deserialize(de::value::SeqAccessDeserializer::new(seq))?,
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_seq(MessageVisitor(PhantomData))
+    }
 }
+
+// fn ignore_contents<'de, D>(deserializer: D) -> Result<(), D::Error>
+// where
+//     D: Deserializer<'de>,
+// {
+//     // Ignore any content at this part of the json structure
+//     let _ = deserializer.deserialize_ignored_any(serde::de::IgnoredAny);
+//     // Return unit as our 'Unknown' variant has no args
+//     Ok(())
+// }
 
 /// Subscription
 #[derive(Clone, Debug)]
@@ -69,35 +128,35 @@ pub struct Subscription {
 
 // https://github.com/serde-rs/serde/issues/1337
 // prefix
-impl<'de> Deserialize<'de> for Subscription {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct PrefixVisitor(PhantomData<()>);
+// impl<'de> Deserialize<'de> for Subscription {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: Deserializer<'de>,
+//     {
+//         struct PrefixVisitor(PhantomData<()>);
 
-        impl<'de> Visitor<'de> for PrefixVisitor {
-            type Value = Subscription;
+//         impl<'de> Visitor<'de> for PrefixVisitor {
+//             type Value = Subscription;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("sequence")
-            }
+//             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+//                 formatter.write_str("sequence")
+//             }
 
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let t = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let r = Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-                Ok(Subscription { id: t, filters: r })
-            }
-        }
+//             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+//             where
+//                 A: SeqAccess<'de>,
+//             {
+//                 let t = seq
+//                     .next_element()?
+//                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+//                 let r = Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+//                 Ok(Subscription { id: t, filters: r })
+//             }
+//         }
 
-        deserializer.deserialize_seq(PrefixVisitor(PhantomData))
-    }
-}
+//         deserializer.deserialize_seq(PrefixVisitor(PhantomData))
+//     }
+// }
 
 /// The message sent to the client
 #[derive(Message, Clone, Debug)]
@@ -222,9 +281,10 @@ mod tests {
     fn de_incoming_message() -> Result<()> {
         // close
         let msg: IncomingMessage = serde_json::from_str(r#"["CLOSE", "sub_id1"]"#)?;
-        assert!(matches!(msg, IncomingMessage::Close { ref id } if id == "sub_id1"));
+        assert!(matches!(msg, IncomingMessage::Close(ref id) if id == "sub_id1"));
 
         let msg = serde_json::from_str::<IncomingMessage>(r#"["CLOSE", "sub_id1", "other"]"#);
+        println!("{:?}", msg);
         assert!(msg.is_err());
 
         // event
@@ -239,19 +299,23 @@ mod tests {
             "tags": [["t", "nostr"], ["t", ""], ["expiration", "1"], ["delegation", "8e0d3d3eb2881ec137a11debe736a9086715a8c8beeeda615780064d68bc25dd"]]
           }]"#,
         )?;
-        assert!(matches!(msg, IncomingMessage::Event { ref event } if event.kind() == 1));
+        assert!(matches!(msg, IncomingMessage::Event( ref event ) if event.kind() == 1));
 
-        let sub: Subscription = serde_json::from_str(r#"["sub_id1", {}, {}]"#)?;
-        assert_eq!(sub.id, "sub_id1");
-        assert_eq!(sub.filters.len(), 2);
+        // let sub: Subscription = serde_json::from_str(r#"["sub_id1", {}, {}]"#)?;
+        // assert_eq!(sub.id, "sub_id1");
+        // assert_eq!(sub.filters.len(), 2);
 
         // req
         let msg: IncomingMessage = serde_json::from_str(r#"["REQ", "sub_id1", {}]"#)?;
         assert!(matches!(msg, IncomingMessage::Req(sub) if sub.id == "sub_id1"));
+        let msg = serde_json::from_str::<IncomingMessage>(r#"["REQ", "sub_id1", ""]"#);
+        assert!(msg.is_err());
+        let msg = serde_json::from_str::<IncomingMessage>(r#"["REQ", "sub_id1"]"#);
+        assert!(msg.is_ok());
 
         // unknown
         let msg: IncomingMessage = serde_json::from_str(r#"["REQ1", "sub_id1", {}]"#)?;
-        assert!(matches!(msg, IncomingMessage::Unknown));
+        assert!(matches!(msg, IncomingMessage::Unknown(ref cmd, ref _val) if cmd == "REQ1"));
 
         Ok(())
     }

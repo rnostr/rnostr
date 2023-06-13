@@ -91,10 +91,8 @@ impl Handler<ClientMessage> for Server {
     type Result = ();
     fn handle(&mut self, msg: ClientMessage, ctx: &mut Self::Context) {
         match msg.msg {
-            IncomingMessage::Event { event } => {
-                self.writer.do_send(WriteEvent { id: msg.id, event })
-            }
-            IncomingMessage::Close { id } => self.subscriber.do_send(Unsubscribe {
+            IncomingMessage::Event(event) => self.writer.do_send(WriteEvent { id: msg.id, event }),
+            IncomingMessage::Close(id) => self.subscriber.do_send(Unsubscribe {
                 id: msg.id,
                 sub_id: Some(id),
             }),
@@ -142,8 +140,11 @@ impl Handler<ClientMessage> for Server {
                     })
                     .wait(ctx);
             }
-            IncomingMessage::Unknown => {
-                self.send_to_client(msg.id, OutgoingMessage::notice("Unsupported message"));
+            IncomingMessage::Unknown(cmd, _val) => {
+                self.send_to_client(
+                    msg.id,
+                    OutgoingMessage::notice(&format!("Unsupported command {}", cmd)),
+                );
             }
         }
     }
