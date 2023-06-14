@@ -10,8 +10,8 @@ pub enum Error {
     Prometheus(#[from] metrics_exporter_prometheus::BuildError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    #[error("error: {0}")]
-    Message(String),
+    #[error("invalid: {0}")]
+    Invalid(String),
 }
 
 impl actix_web::ResponseError for Error {}

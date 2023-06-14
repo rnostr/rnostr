@@ -1,6 +1,6 @@
 use actix::{Message, MessageResponse, Recipient};
 use bytestring::ByteString;
-use nostr_db::{CheckEventResult, Event, Filter};
+use nostr_db::{now, CheckEventResult, Event, Filter};
 use serde::{
     de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer,
@@ -8,6 +8,8 @@ use serde::{
 use serde_json::{json, Value};
 use std::fmt::Display;
 use std::{fmt, marker::PhantomData};
+
+use crate::{setting::Limitation, Error};
 
 /// New session is created
 #[derive(Message)]
@@ -33,6 +35,57 @@ pub struct ClientMessage {
     pub text: String,
     /// parsed message
     pub msg: IncomingMessage,
+}
+
+macro_rules! check_max {
+    ($source:expr, $limit:expr) => {
+        if $source > $limit {
+            return Err(Error::Invalid(format!("{} {}", stringify!($limit), $limit)));
+        }
+    };
+}
+
+macro_rules! check_min {
+    ($source:expr, $limit:expr) => {
+        if $source < $limit {
+            return Err(Error::Invalid(format!("{} {}", stringify!($limit), $limit)));
+        }
+    };
+}
+
+impl ClientMessage {
+    pub fn validate(&mut self, limitation: &Limitation) -> Result<(), Error> {
+        check_max!(self.text.as_bytes().len(), limitation.max_message_length);
+
+        match &mut self.msg {
+            IncomingMessage::Event(event) => {
+                check_max!(event.tags().len(), limitation.max_event_tags);
+                event.validate(
+                    now(),
+                    limitation.max_event_time_older_than_now,
+                    limitation.max_event_time_newer_than_now,
+                )?;
+            }
+
+            IncomingMessage::Req(sub) => {
+                check_max!(sub.filters.len(), limitation.max_filters);
+                check_max!(sub.id.len(), limitation.max_subid_length);
+
+                for f in &mut sub.filters {
+                    // fill default limit
+                    f.default_limit(limitation.max_limit);
+                    check_max!(f.limit.unwrap(), limitation.max_limit);
+                    if let Some(ids) = &f.ids {
+                        for id in ids {
+                            check_min!(id.len(), limitation.min_prefix);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 // #[derive(Deserialize, Clone, Debug)]

@@ -26,7 +26,8 @@ impl Server {
 
         Server::create(|ctx| {
             let writer = Writer::new(Arc::clone(&db), ctx.address().recipient()).start();
-            let subscriber = Subscriber::new(ctx.address().recipient()).start();
+            let subscriber =
+                Subscriber::new(ctx.address().recipient(), Arc::clone(&setting)).start();
             let addr = ctx.address().recipient();
             info!("starting {} reader workers", num);
             let reader =

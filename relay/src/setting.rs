@@ -78,30 +78,30 @@ impl Default for Network {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Limitation {
-    /// this is the maximum number of bytes for incoming JSON. default 64K
-    pub max_message_length: u64,
+    /// this is the maximum number of bytes for incoming JSON. default 512K
+    pub max_message_length: usize,
     /// total number of subscriptions that may be active on a single websocket connection to this relay. default 20
-    pub max_subscriptions: u64,
+    pub max_subscriptions: usize,
     /// maximum number of filter values in each subscription. default 10
-    pub max_filters: u64,
+    pub max_filters: usize,
     /// the relay server will clamp each filter's limit value to this number. This means the client won't be able to get more than this number of events from a single subscription filter. default 300
     pub max_limit: u64,
     /// maximum length of subscription id as a string. default 100
-    pub max_subid_length: u64,
+    pub max_subid_length: usize,
     /// for authors and ids filters which are to match against a hex prefix, you must provide at least this many hex digits in the prefix. default 10
-    pub min_prefix: u64,
+    pub min_prefix: usize,
     /// in any event, this is the maximum number of elements in the tags list. default 5000
-    pub max_event_tags: u64,
-    /// Events older than this will be rejected. default 3 years
+    pub max_event_tags: usize,
+    /// Events older than this will be rejected. default 3 years, 0 ignore
     pub max_event_time_older_than_now: u64,
-    /// Events newer than this will be rejected. default 15 minutes
+    /// Events newer than this will be rejected. default 15 minutes, 0 ignore
     pub max_event_time_newer_than_now: u64,
 }
 
 impl Default for Limitation {
     fn default() -> Self {
         Self {
-            max_message_length: 65536,
+            max_message_length: 524288,
             max_subscriptions: 20,
             max_filters: 10,
             max_limit: 300,

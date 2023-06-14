@@ -37,8 +37,8 @@ port = 7707
 # reader = 0
 
 [limitation]
-# this is the maximum number of bytes for incoming JSON. default 64K
-max_message_length = 65536
+# this is the maximum number of bytes for incoming JSON. default 512K
+max_message_length = 524288
 # total number of subscriptions that may be active on a single websocket connection to this relay. default 20
 max_subscriptions = 20
 # maximum number of filter values in each subscription. default 10

@@ -167,6 +167,19 @@ impl EventIndex {
     pub fn delegator(&self) -> Option<&Vec<u8>> {
         return self.delegator.as_ref();
     }
+
+    pub fn is_ephemeral(&self) -> bool {
+        let kind = self.kind;
+        kind >= 20_000 && kind < 30_000
+    }
+
+    pub fn is_expired(&self, now: u64) -> bool {
+        if let Some(exp) = self.expiration {
+            exp < now
+        } else {
+            false
+        }
+    }
 }
 
 impl ArchivedEventIndex {
@@ -195,6 +208,19 @@ impl ArchivedEventIndex {
 
     pub fn delegator(&self) -> Option<&ArchivedVec<u8>> {
         return self.delegator.as_ref();
+    }
+
+    pub fn is_ephemeral(&self) -> bool {
+        let kind = self.kind;
+        kind >= 20_000 && kind < 30_000
+    }
+
+    pub fn is_expired(&self, now: u64) -> bool {
+        if let Some(exp) = self.expiration.as_ref() {
+            exp < &now
+        } else {
+            false
+        }
     }
 }
 // the shadow event for deserialize
@@ -431,19 +457,6 @@ pub fn now() -> u64 {
 }
 
 impl Event {
-    pub fn is_ephemeral(&self) -> bool {
-        let kind = self.kind();
-        kind >= 20_000 && kind < 30_000
-    }
-
-    pub fn is_expired(&self, now: u64) -> bool {
-        if let Some(exp) = self.index.expiration {
-            exp < now
-        } else {
-            false
-        }
-    }
-
     pub fn hash(&self) -> Vec<u8> {
         let json: Value = json!([
             0,
@@ -458,31 +471,44 @@ impl Event {
         hasher.finalize().to_vec()
     }
 
-    pub fn verify_id(&self) -> bool {
-        &self.hash() == self.id()
+    pub fn verify_id(&self) -> Result<(), Error> {
+        if &self.hash() == self.id() {
+            Ok(())
+        } else {
+            Err(Error::Invalid("bad event id".to_owned()))
+        }
     }
 
-    pub fn verify_sign(&self) -> bool {
-        verify_sign(&self.sig, self.pubkey(), self.id()).is_ok()
+    pub fn verify_sign(&self) -> Result<(), Error> {
+        if verify_sign(&self.sig, self.pubkey(), self.id()).is_ok() {
+            Ok(())
+        } else {
+            Err(Error::Invalid("signature is wrong".to_owned()))
+        }
     }
 
     /// check event created time newer than (now - older), older than (now + newer)
-    /// max_time_older_than_now
-    /// max_time_newer_than_now
-    pub fn verify_time(&self, now: u64, older: Option<u64>, newer: Option<u64>) -> bool {
+    /// ignore when 0
+    pub fn verify_time(&self, now: u64, older: u64, newer: u64) -> Result<(), Error> {
         let time = self.created_at();
-        if let Some(left) = older {
-            if time < now - left {
-                return false;
+        if 0 != older {
+            if time < now - older {
+                return Err(Error::Invalid(format!(
+                    "event creation date must be newer than {}",
+                    now - older
+                )));
             }
         }
 
-        if let Some(right) = newer {
-            if time > now + right {
-                return false;
+        if 0 != newer {
+            if time > now + newer {
+                return Err(Error::Invalid(format!(
+                    "event creation date must be older than {}",
+                    now + newer
+                )));
             }
         }
-        true
+        Ok(())
     }
 
     pub fn verify_delegation(&self) -> Result<(), Error> {
@@ -498,27 +524,14 @@ impl Event {
         }
     }
 
-    pub fn validate(&self, now: u64, older: Option<u64>, newer: Option<u64>) -> Result<(), Error> {
-        if !self.verify_time(now, older, newer) {
-            return Err(Error::Invalid(
-                "event creation date is too far off".to_owned(),
-            ));
-        }
-
-        if self.is_expired(now) {
+    pub fn validate(&self, now: u64, older: u64, newer: u64) -> Result<(), Error> {
+        if self.index.is_expired(now) {
             return Err(Error::Invalid("event is expired".to_owned()));
         }
-
-        if !self.verify_id() {
-            return Err(Error::Invalid("bad event id".to_owned()));
-        }
-
-        if !self.verify_sign() {
-            return Err(Error::Invalid("signature is wrong".to_owned()));
-        }
-
+        self.verify_time(now, older, newer)?;
+        self.verify_id()?;
+        self.verify_sign()?;
         self.verify_delegation()?;
-
         Ok(())
     }
 }
@@ -717,23 +730,23 @@ mod tests {
         {"content":"bgQih8o+R83t00qvueD7twglJRvvabI+nDu+bTvRsAs=?iv=92TlqnpEeiUMzDtUxsZeUA==","created_at":1682257003,"id":"dba1951f0959dfea6e3123ad916d191a07b35392c4b541d4b4814e77113de14a","kind":4,"pubkey":"3f770d65d3a764a9c5cb503ae123e62ec7598ad035d836e2a810f3877a745b24","sig":"15dcc89bca7d037d6a5282c1e63ea40ca4f76d81821ca1260898a324c99516a0cb577617cf18a3febe6303ed32e7a1a08382eecde5a7183195ca8f186a0cb037","tags":[["p","6efb74e66b7ed7fb9fb7b8b8f12e1fbbabe7f45823a33a14ac60cc9241285536"]]}
         "#;
         let event: Event = serde_json::from_str(note)?;
-        assert!(event.verify_sign());
-        assert!(event.verify_id());
-        assert!(!event.is_expired(now()));
-        assert!(!event.is_ephemeral());
+        assert!(event.verify_sign().is_ok());
+        assert!(event.verify_id().is_ok());
+        assert!(!event.index().is_expired(now()));
+        assert!(!event.index().is_ephemeral());
 
         let note = r#"
         {"content":"{\"display_name\": \"maglevclient\", \"uptime\": 103180, \"maglev\": \"1a98030114cf\"}","created_at":1682258083,"id":"153a480d7bb9d7564147241b330a8667b19c3f9178b8179e64bf57f200654cb0","kind":0,"pubkey":"fb7324a1b807b48756be8df06bd9ccf11741a9678b120e91e044b5137734dcb2","sig":"08c0ffa072fd49f405df467ccab25152a54073fc0639ea0952e1eabff7962e008c54cb8f4d2d55dc4398703df4a5654d2ae3e93f68a801bcbabcdb8050a918ef","tags":[["t","TESTmaglev"],["expiration","1682258683"]]}      
           "#;
         let event: Event = serde_json::from_str(note)?;
-        assert!(event.verify_sign());
-        assert!(event.verify_id());
-        assert!(event.is_expired(now()));
+        assert!(event.verify_sign().is_ok());
+        assert!(event.verify_id().is_ok());
+        assert!(event.index().is_expired(now()));
 
         let event = Event::new(vec![], vec![], 10, 1, vec![], "".to_string(), vec![])?;
-        assert!(event.verify_time(10, Some(1), Some(1)));
-        assert!(!event.verify_time(20, Some(1), Some(1)));
-        assert!(!event.verify_time(5, Some(1), Some(1)));
+        assert!(event.verify_time(10, 1, 1).is_ok());
+        assert!(event.verify_time(20, 1, 1).is_err());
+        assert!(event.verify_time(5, 1, 1).is_err());
 
         let note = r#"
         {

@@ -3,7 +3,6 @@ use actix::prelude::*;
 use actix_web::web;
 use actix_web_actors::ws;
 use metrics::{decrement_gauge, increment_counter, increment_gauge};
-use nostr_db::now;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -156,28 +155,20 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 let msg = serde_json::from_str::<IncomingMessage>(&text);
                 match msg {
                     // TODO: validate
-                    Ok(mut msg) => {
-                        match &mut msg {
-                            IncomingMessage::Event(event) => {
-                                if let Err(err) = event.validate(now(), None, None) {
-                                    ctx.text(OutgoingMessage::notice(&err.to_string()));
-                                    return;
-                                }
-                            }
-                            IncomingMessage::Req(sub) => {
-                                for f in &mut sub.filters {
-                                    // fill default limit
-                                    f.default_limit(500);
-                                }
-                            }
-                            _ => {}
-                        }
-
-                        let msg = ClientMessage {
+                    Ok(msg) => {
+                        let mut msg = ClientMessage {
                             id: self.id,
                             text,
                             msg,
                         };
+                        {
+                            let r = self.app.setting.read();
+                            if let Err(err) = msg.validate(&r.limitation) {
+                                ctx.text(OutgoingMessage::notice(&err.to_string()));
+                                return;
+                            }
+                        }
+
                         match self.app.clone().extensions.call_message(msg, self, ctx) {
                             crate::ExtensionMessageResult::Continue(msg) => {
                                 self.server.do_send(msg);

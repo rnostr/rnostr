@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::message::*;
+use crate::{message::*, setting::SettingWrapper};
 use actix::prelude::*;
 use nostr_db::Event;
 
@@ -10,14 +10,16 @@ pub struct Subscriber {
     pub events: Vec<(usize, Event)>,
     /// map session id -> sub id -> subscription
     pub subscriptions: HashMap<usize, HashMap<String, Subscription>>,
+    pub setting: SettingWrapper,
 }
 
 impl Subscriber {
-    pub fn new(addr: Recipient<SubscribeResult>) -> Self {
+    pub fn new(addr: Recipient<SubscribeResult>, setting: SettingWrapper) -> Self {
         Self {
             addr,
             events: Vec::new(),
             subscriptions: HashMap::new(),
+            setting,
         }
     }
 }
@@ -34,10 +36,10 @@ impl Handler<Subscribe> for Subscriber {
     fn handle(&mut self, msg: Subscribe, _: &mut Self::Context) -> Subscribed {
         let map = self.subscriptions.entry(msg.id).or_default();
         let sub_id = msg.subscription.id.clone();
+        let r = self.setting.read();
         if map.contains_key(&sub_id) {
             Subscribed::Duplicate
-        } else if map.len() >= 30 {
-            // TODO: config limit
+        } else if map.len() >= r.limitation.max_subscriptions {
             Subscribed::Overlimit
         } else {
             map.insert(msg.subscription.id.clone(), msg.subscription);
@@ -83,6 +85,8 @@ impl Handler<Dispatch> for Subscriber {
 
 #[cfg(test)]
 mod tests {
+    use crate::Setting;
+
     use super::*;
     use actix_rt::time::sleep;
     use anyhow::Result;
@@ -124,7 +128,7 @@ mod tests {
         let receiver = receiver.start();
         let addr = receiver.recipient();
 
-        let subscriber = Subscriber::new(addr.clone()).start();
+        let subscriber = Subscriber::new(addr.clone(), Setting::default_wrapper()).start();
 
         subscriber
             .send(Dispatch {
