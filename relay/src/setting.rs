@@ -24,7 +24,7 @@ pub struct Db {
 impl Default for Db {
     fn default() -> Self {
         Self {
-            path: PathBuf::from("./data/db"),
+            path: PathBuf::from("./data"),
         }
     }
 }
