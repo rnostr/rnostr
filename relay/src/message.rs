@@ -353,7 +353,6 @@ mod tests {
         assert!(matches!(msg, IncomingMessage::Close(ref id) if id == "sub_id1"));
 
         let msg = serde_json::from_str::<IncomingMessage>(r#"["CLOSE", "sub_id1", "other"]"#);
-        println!("{:?}", msg);
         assert!(msg.is_err());
 
         // event

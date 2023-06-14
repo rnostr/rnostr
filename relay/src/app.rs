@@ -197,7 +197,10 @@ pub fn describe_metrics() {
 
 #[cfg(test)]
 pub mod tests {
+    use std::time::Duration;
+
     use crate::create_test_app;
+    use actix_rt::time::sleep;
     use actix_web::{
         dev::Service,
         test::{init_service, read_body, TestRequest},
@@ -211,6 +214,7 @@ pub mod tests {
     async fn relay_info() -> Result<()> {
         let data = create_test_app("")?;
         let app = init_service(data.web_app()).await;
+        sleep(Duration::from_millis(50)).await;
         let req = TestRequest::with_uri("/")
             .insert_header(("Accept", "application/nostr+json"))
             .to_request();
@@ -230,6 +234,7 @@ pub mod tests {
         metrics::increment_counter!("test_metric");
 
         let app = init_service(data.web_app()).await;
+        sleep(Duration::from_millis(50)).await;
         let req = TestRequest::with_uri("/metrics").to_request();
         let res = app.call(req).await.unwrap();
         assert_eq!(res.status(), 200);
