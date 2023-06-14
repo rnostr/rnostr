@@ -1,7 +1,9 @@
 use crate::{
     message::{ClientMessage, OutgoingMessage},
+    setting::SettingWrapper,
     Session,
 };
+use actix_web::web::ServiceConfig;
 
 pub enum ExtensionMessageResult {
     /// Continue run the next extension message method, the server takes over finally.
@@ -14,6 +16,14 @@ pub enum ExtensionMessageResult {
 
 /// Extension for user session
 pub trait Extension: Send + Sync {
+    /// Execute when added to extension list and setting reload
+    #[allow(unused_variables)]
+    fn setting(&self, setting: &SettingWrapper) {}
+
+    /// config actix web service
+    #[allow(unused_variables)]
+    fn config_web(&self, cfg: &mut ServiceConfig) {}
+
     /// Execute after a user connect
     #[allow(unused_variables)]
     fn connected(&self, session: &mut Session, ctx: &mut <Session as actix::Actor>::Context) {}
@@ -43,6 +53,18 @@ pub struct Extensions {
 impl Extensions {
     pub fn add<E: Extension + 'static>(&mut self, ext: E) {
         self.list.push(Box::new(ext));
+    }
+
+    pub fn call_setting(&self, setting: &SettingWrapper) {
+        for ext in &self.list {
+            ext.setting(setting);
+        }
+    }
+
+    pub fn call_config_web(&self, cfg: &mut ServiceConfig) {
+        for ext in &self.list {
+            ext.config_web(cfg);
+        }
     }
 
     pub fn call_connected(

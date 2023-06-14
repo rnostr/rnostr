@@ -11,10 +11,14 @@ use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Information {
-    pub name: Option<String>,
-    pub description: Option<String>,
+    pub name: String,
+    pub description: String,
     pub pubkey: Option<String>,
     pub contact: Option<String>,
+    pub software: String,
+
+    #[serde(skip_deserializing)]
+    pub version: String,
     // supported_nips, software, version
 }
 
@@ -158,7 +162,10 @@ impl Setting {
         Ok(setting)
     }
 
-    pub fn watch<P: AsRef<Path>>(file: P) -> Result<(SettingWrapper, RecommendedWatcher)> {
+    pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
+        file: P,
+        f: F,
+    ) -> Result<(SettingWrapper, RecommendedWatcher)> {
         let setting = Self::read(&file)?;
         let setting = Arc::new(RwLock::new(setting));
         let c_file = file.as_ref().to_path_buf();
@@ -175,8 +182,11 @@ impl Setting {
                         match Self::read(&c_file) {
                             Ok(new_setting) => {
                                 info!("Reload config success {:?}", c_file);
-                                let mut w = c_setting.write();
-                                *w = new_setting;
+                                {
+                                  let mut w = c_setting.write();
+                                  *w = new_setting;
+                                }
+                                f(&c_setting);
                             }
                             Err(e) => {
                                 error!(error = e.to_string(), "failed to reload config {:?}", c_file);
@@ -212,7 +222,7 @@ mod tests {
             .tempfile()?;
 
         let setting = Setting::read(&file)?;
-        assert_eq!(setting.information.name, None);
+        assert_eq!(setting.information.name, "");
         fs::write(
             &file,
             r#"[information]
@@ -220,7 +230,7 @@ mod tests {
         "#,
         )?;
         let setting = Setting::read(&file)?;
-        assert_eq!(setting.information.name, Some("nostr".to_string()));
+        assert_eq!(setting.information.name, "nostr".to_string());
         Ok(())
     }
 
@@ -231,8 +241,8 @@ mod tests {
             .suffix(".toml")
             .tempfile()?;
 
-        let (setting, _watcher) = Setting::watch(&file)?;
-        assert_eq!(setting.read().information.name, None);
+        let (setting, _watcher) = Setting::watch(&file, |_s| {})?;
+        assert_eq!(setting.read().information.name, "");
         fs::write(
             &file,
             r#"[information]
@@ -241,7 +251,7 @@ mod tests {
         )?;
         sleep(Duration::from_millis(100));
         // println!("read {:?} {:?}", setting.read(), file);
-        assert_eq!(setting.read().information.name, Some("nostr".to_string()));
+        assert_eq!(setting.read().information.name, "nostr".to_string());
         Ok(())
     }
 }

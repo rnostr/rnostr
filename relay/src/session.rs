@@ -107,7 +107,7 @@ impl Actor for Session {
                 match res {
                     Ok(res) => {
                         act.id = res;
-                        act.app.clone().extensions.call_connected(act, ctx);
+                        act.app.clone().extensions.read().call_connected(act, ctx);
                         debug!("Session started {:?} {:?}", act.id, act.ip);
                     }
                     // something is wrong with server
@@ -126,7 +126,11 @@ impl Actor for Session {
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
         decrement_gauge!("current_connections", 1.0);
-        self.app.clone().extensions.call_disconnected(self, ctx);
+        self.app
+            .clone()
+            .extensions
+            .read()
+            .call_disconnected(self, ctx);
         debug!("Session stopped {:?} {:?}", self.id, self.ip);
     }
 }
@@ -169,7 +173,13 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                             }
                         }
 
-                        match self.app.clone().extensions.call_message(msg, self, ctx) {
+                        match self
+                            .app
+                            .clone()
+                            .extensions
+                            .read()
+                            .call_message(msg, self, ctx)
+                        {
                             crate::ExtensionMessageResult::Continue(msg) => {
                                 self.server.do_send(msg);
                             }

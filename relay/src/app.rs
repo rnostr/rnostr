@@ -9,6 +9,7 @@ use actix_web::{
 use metrics::describe_counter;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use nostr_db::Db;
+use notify::RecommendedWatcher;
 use parking_lot::RwLock;
 use std::{path::Path, sync::Arc};
 use tracing::info;
@@ -83,18 +84,40 @@ pub mod route {
 pub struct App {
     pub server: Addr<Server>,
     pub db: Arc<Db>,
-    pub setting: Arc<RwLock<Setting>>,
+    pub setting: SettingWrapper,
     pub prometheus_handle: PrometheusHandle,
-    pub extensions: Extensions,
+    pub extensions: Arc<RwLock<Extensions>>,
+    pub watcher: Option<RecommendedWatcher>,
 }
 
 impl App {
     /// db_path: overwrite setting db path
     pub fn create<P: AsRef<Path>>(
-        setting: SettingWrapper,
+        setting_path: Option<P>,
+        watch: bool,
         db_path: Option<P>,
         prometheus_handle: PrometheusHandle,
     ) -> Result<Self> {
+        let extensions = Arc::new(RwLock::new(Extensions::default()));
+        let c_extensions = Arc::clone(&extensions);
+        let (setting, watcher) = if watch && setting_path.is_some() {
+            let path = setting_path.as_ref().unwrap().as_ref();
+            info!("Watch config {:?}", path);
+            let r = Setting::watch(path, move |s| {
+                let r = c_extensions.read();
+                r.call_setting(s);
+            })?;
+            (r.0, Some(r.1))
+        } else {
+            if let Some(path) = setting_path {
+                info!("Load config {:?}", path.as_ref());
+                (Setting::read_wrapper(path.as_ref())?, None)
+            } else {
+                info!("Load default config");
+                (Setting::default_wrapper(), None)
+            }
+        };
+
         let r = setting.read();
         let path = db_path
             .map(|p| p.as_ref().to_path_buf())
@@ -110,12 +133,17 @@ impl App {
             setting,
             db,
             prometheus_handle,
-            extensions: Extensions::default(),
+            extensions,
+            watcher,
         })
     }
 
-    pub fn add_extension<E: Extension + 'static>(mut self, ext: E) -> Self {
-        self.extensions.add(ext);
+    pub fn add_extension<E: Extension + 'static>(self, ext: E) -> Self {
+        ext.setting(&self.setting);
+        {
+            let mut w = self.extensions.write();
+            w.add(ext);
+        }
         self
     }
 
@@ -177,7 +205,11 @@ fn create_app(
     >,
 > {
     let app = WebApp::new();
+    let extensions = data.extensions.clone();
     app.app_data(data)
+        .configure(|cfg| {
+            extensions.read().call_config_web(cfg);
+        })
         .service(web::resource("/metrics").route(web::get().to(route::metrics)))
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(

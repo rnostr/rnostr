@@ -50,7 +50,8 @@ lazy_static! {
 #[cfg(test)]
 pub fn create_test_app(db_path: &str) -> anyhow::Result<App> {
     Ok(App::create(
-        Setting::default_wrapper(),
+        None,
+        false,
         Some(temp_db_path(db_path)?),
         PROMETHEUS_HANDLE.clone(),
     )?)
