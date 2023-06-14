@@ -92,7 +92,16 @@ impl Handler<ClientMessage> for Server {
     type Result = ();
     fn handle(&mut self, msg: ClientMessage, ctx: &mut Self::Context) {
         match msg.msg {
-            IncomingMessage::Event(event) => self.writer.do_send(WriteEvent { id: msg.id, event }),
+            IncomingMessage::Event(event) => {
+                // don't save ephemeral event
+                if event.index().is_ephemeral() {
+                    let event_id = hex::encode(event.id());
+                    self.subscriber.do_send(Dispatch { id: msg.id, event });
+                    self.send_to_client(msg.id, OutgoingMessage::ok(&event_id, true, ""));
+                } else {
+                    self.writer.do_send(WriteEvent { id: msg.id, event })
+                }
+            }
             IncomingMessage::Close(id) => self.subscriber.do_send(Unsubscribe {
                 id: msg.id,
                 sub_id: Some(id),
