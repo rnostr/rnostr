@@ -26,7 +26,6 @@ enum Commands {
     #[command(arg_required_else_help = true)]
     Bench(BenchOpts),
     /// Start nostr relay server
-    #[command(arg_required_else_help = true)]
     Relay(RelayOpts),
 }
 
