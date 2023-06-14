@@ -1,0 +1,60 @@
+# config relay information
+[information]
+name = "nostr relay"
+
+# config db
+[db]
+# the db path (restart required)
+path = "./data"
+
+# config network
+[network]
+# Interface to listen on. Use 0.0.0.0 to listen on all interfaces (restart required)
+host = "127.0.0.1"
+# Listen port (restart required)
+port = 7707
+
+# real ip header (default empty)
+# ie: cf-connecting-ip, x-real-ip, x-forwarded-for
+# real_ip_header = ["x-forwarded-for", "cf-connecting-ip"]
+
+# heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
+# How long before lack of client response causes a timeout
+# heartbeat_timeout = 120
+
+# heartbeat interval (default 60 seconds)
+# How often heartbeat pings are sent
+# heartbeat_interval = 60
+
+# config thread (restart required)
+[thread]
+# number of http server threads (restart required)
+# default 0 will use the num of cpus
+# http = 0
+
+# number of read event threads (restart required)
+# default 0 will use the num of cpus
+# reader = 0
+
+[limitation]
+# this is the maximum number of bytes for incoming JSON. default 64K
+max_message_length = 65536
+# total number of subscriptions that may be active on a single websocket connection to this relay. default 20
+max_subscriptions = 20
+# maximum number of filter values in each subscription. default 10
+max_filters = 10
+# the relay server will clamp each filter's limit value to this number. This means the client won't be able to get more than this number of events from a single subscription filter. default 300
+max_limit = 300
+# maximum length of subscription id as a string. default 100
+max_subid_length = 100
+# for authors and ids filters which are to match against a hex prefix, you must provide at least this many hex digits in the prefix. default 10
+min_prefix = 10
+# in any event, this is the maximum number of elements in the tags list. default 5000
+max_event_tags = 5000
+# Events older than this will be rejected. default 3 years
+max_event_time_older_than_now = 94608000
+# Events newer than this will be rejected. default 15 minutes
+max_event_time_newer_than_now = 900
+
+[auth]
+enabled = true

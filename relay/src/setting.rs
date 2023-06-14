@@ -3,6 +3,8 @@ use config::{Config, File};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{error, info};
@@ -74,12 +76,55 @@ impl Default for Network {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Limitation {
+    /// this is the maximum number of bytes for incoming JSON. default 64K
+    pub max_message_length: u64,
+    /// total number of subscriptions that may be active on a single websocket connection to this relay. default 20
+    pub max_subscriptions: u64,
+    /// maximum number of filter values in each subscription. default 10
+    pub max_filters: u64,
+    /// the relay server will clamp each filter's limit value to this number. This means the client won't be able to get more than this number of events from a single subscription filter. default 300
+    pub max_limit: u64,
+    /// maximum length of subscription id as a string. default 100
+    pub max_subid_length: u64,
+    /// for authors and ids filters which are to match against a hex prefix, you must provide at least this many hex digits in the prefix. default 10
+    pub min_prefix: u64,
+    /// in any event, this is the maximum number of elements in the tags list. default 5000
+    pub max_event_tags: u64,
+    /// Events older than this will be rejected. default 3 years
+    pub max_event_time_older_than_now: u64,
+    /// Events newer than this will be rejected. default 15 minutes
+    pub max_event_time_newer_than_now: u64,
+}
+
+impl Default for Limitation {
+    fn default() -> Self {
+        Self {
+            max_message_length: 65536,
+            max_subscriptions: 20,
+            max_filters: 10,
+            max_limit: 300,
+            max_subid_length: 100,
+            min_prefix: 10,
+            max_event_tags: 5000,
+            max_event_time_older_than_now: 94608000,
+            max_event_time_newer_than_now: 900,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Setting {
     pub information: Information,
     pub db: Db,
     pub thread: Thread,
     pub network: Network,
+    pub limitation: Limitation,
+
+    /// flatten extensions setting
+    #[serde(flatten)]
+    pub extensions: HashMap<String, HashMap<String, Value>>,
 }
 
 pub type SettingWrapper = Arc<RwLock<Setting>>;
@@ -109,8 +154,8 @@ impl Setting {
             .add_source(File::with_name(file.as_ref().to_str().unwrap()))
             .build()?;
 
-        let config: Setting = config.try_deserialize()?;
-        Ok(config)
+        let setting: Setting = config.try_deserialize()?;
+        Ok(setting)
     }
 
     pub fn watch<P: AsRef<Path>>(file: P) -> Result<(SettingWrapper, RecommendedWatcher)> {
