@@ -306,6 +306,10 @@ mod tests {
         ) -> ExtensionMessageResult {
             ExtensionMessageResult::Stop(OutgoingMessage::notice("extension"))
         }
+
+        fn name(&self) -> &'static str {
+            "Ext"
+        }
     }
 
     #[actix_rt::test]

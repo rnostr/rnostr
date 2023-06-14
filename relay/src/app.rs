@@ -6,8 +6,6 @@ use actix_web::{
     dev::{ServiceFactory, ServiceRequest},
     web, App as WebApp, HttpServer,
 };
-use metrics::describe_counter;
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use nostr_db::Db;
 use notify::RecommendedWatcher;
 use parking_lot::RwLock;
@@ -68,16 +66,6 @@ pub mod route {
 
         Ok(HttpResponse::Ok().body("Hello World!"))
     }
-
-    pub async fn metrics(
-        _req: HttpRequest,
-        _stream: web::Payload,
-        data: web::Data<App>,
-    ) -> Result<HttpResponse, Error> {
-        Ok(HttpResponse::Ok()
-            .insert_header(("Content-Type", "text/plain"))
-            .body(data.prometheus_handle.render()))
-    }
 }
 
 /// App with data
@@ -85,7 +73,6 @@ pub struct App {
     pub server: Addr<Server>,
     pub db: Arc<Db>,
     pub setting: SettingWrapper,
-    pub prometheus_handle: PrometheusHandle,
     pub extensions: Arc<RwLock<Extensions>>,
     pub watcher: Option<RecommendedWatcher>,
 }
@@ -96,7 +83,6 @@ impl App {
         setting_path: Option<P>,
         watch: bool,
         db_path: Option<P>,
-        prometheus_handle: PrometheusHandle,
     ) -> Result<Self> {
         let extensions = Arc::new(RwLock::new(Extensions::default()));
         let c_extensions = Arc::clone(&extensions);
@@ -104,8 +90,8 @@ impl App {
             let path = setting_path.as_ref().unwrap().as_ref();
             info!("Watch config {:?}", path);
             let r = Setting::watch(path, move |s| {
-                let r = c_extensions.read();
-                r.call_setting(s);
+                let mut w = c_extensions.write();
+                w.call_setting(s);
             })?;
             (r.0, Some(r.1))
         } else {
@@ -132,13 +118,13 @@ impl App {
             server,
             setting,
             db,
-            prometheus_handle,
             extensions,
             watcher,
         })
     }
 
-    pub fn add_extension<E: Extension + 'static>(self, ext: E) -> Self {
+    pub fn add_extension<E: Extension + 'static>(self, mut ext: E) -> Self {
+        info!("Add extension {:?}", ext.name());
         ext.setting(&self.setting);
         {
             let mut w = self.extensions.write();
@@ -162,8 +148,6 @@ impl App {
     }
 
     pub fn web_server(self) -> Result<actix_server::Server, std::io::Error> {
-        describe_metrics();
-
         let r = self.setting.read();
         let num = if r.thread.reader == 0 {
             num_cpus::get()
@@ -182,17 +166,6 @@ impl App {
     }
 }
 
-pub fn create_prometheus_handle() -> PrometheusHandle {
-    let builder = PrometheusBuilder::new();
-    builder
-        // .idle_timeout(
-        //     metrics_util::MetricKindMask::ALL,
-        //     Some(std::time::Duration::from_secs(10)),
-        // )
-        .install_recorder()
-        .unwrap()
-}
-
 fn create_app(
     data: web::Data<App>,
 ) -> WebApp<
@@ -208,9 +181,8 @@ fn create_app(
     let extensions = data.extensions.clone();
     app.app_data(data)
         .configure(|cfg| {
-            extensions.read().call_config_web(cfg);
+            extensions.write().call_config_web(cfg);
         })
-        .service(web::resource("/metrics").route(web::get().to(route::metrics)))
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(
             Cors::default()
@@ -222,11 +194,6 @@ fn create_app(
         )
 }
 
-pub fn describe_metrics() {
-    describe_counter!("new_connections", "The total count of new connections");
-    describe_counter!("current_connections", "The number of current connections");
-}
-
 #[cfg(test)]
 pub mod tests {
     use std::time::Duration;
@@ -235,7 +202,7 @@ pub mod tests {
     use actix_rt::time::sleep;
     use actix_web::{
         dev::Service,
-        test::{init_service, read_body, TestRequest},
+        test::{init_service, TestRequest},
     };
     use actix_web_actors::ws;
     use anyhow::Result;
@@ -257,23 +224,6 @@ pub mod tests {
             "application/nostr+json"
         );
 
-        Ok(())
-    }
-
-    #[actix_rt::test]
-    async fn metrics() -> Result<()> {
-        let data = create_test_app("")?;
-        metrics::increment_counter!("test_metric");
-
-        let app = init_service(data.web_app()).await;
-        sleep(Duration::from_millis(50)).await;
-        let req = TestRequest::with_uri("/metrics").to_request();
-        let res = app.call(req).await.unwrap();
-        assert_eq!(res.status(), 200);
-
-        let result = read_body(res).await;
-        let result = String::from_utf8(result.to_vec())?;
-        assert!(result.contains("test_metric"));
         Ok(())
     }
 

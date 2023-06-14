@@ -16,13 +16,15 @@ pub enum ExtensionMessageResult {
 
 /// Extension for user session
 pub trait Extension: Send + Sync {
+    fn name(&self) -> &'static str;
+
     /// Execute when added to extension list and setting reload
     #[allow(unused_variables)]
-    fn setting(&self, setting: &SettingWrapper) {}
+    fn setting(&mut self, setting: &SettingWrapper) {}
 
     /// config actix web service
     #[allow(unused_variables)]
-    fn config_web(&self, cfg: &mut ServiceConfig) {}
+    fn config_web(&mut self, cfg: &mut ServiceConfig) {}
 
     /// Execute after a user connect
     #[allow(unused_variables)]
@@ -55,14 +57,14 @@ impl Extensions {
         self.list.push(Box::new(ext));
     }
 
-    pub fn call_setting(&self, setting: &SettingWrapper) {
-        for ext in &self.list {
+    pub fn call_setting(&mut self, setting: &SettingWrapper) {
+        for ext in &mut self.list {
             ext.setting(setting);
         }
     }
 
-    pub fn call_config_web(&self, cfg: &mut ServiceConfig) {
-        for ext in &self.list {
+    pub fn call_config_web(&mut self, cfg: &mut ServiceConfig) {
+        for ext in &mut self.list {
             ext.config_web(cfg);
         }
     }

@@ -20,6 +20,7 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 mod app;
 mod extension;
+pub mod extensions;
 pub mod message;
 mod reader;
 mod server;
@@ -39,20 +40,8 @@ pub fn temp_db_path(p: &str) -> anyhow::Result<tempfile::TempDir> {
         .prefix(&format!("nostr-relay-test-db-{}", p))
         .tempdir()?)
 }
-#[cfg(test)]
-use lazy_static::lazy_static;
-#[cfg(test)]
-lazy_static! {
-    pub static ref PROMETHEUS_HANDLE: metrics_exporter_prometheus::PrometheusHandle =
-        create_prometheus_handle();
-}
 
 #[cfg(test)]
 pub fn create_test_app(db_path: &str) -> anyhow::Result<App> {
-    Ok(App::create(
-        None,
-        false,
-        Some(temp_db_path(db_path)?),
-        PROMETHEUS_HANDLE.clone(),
-    )?)
+    Ok(App::create(None, false, Some(temp_db_path(db_path)?))?)
 }
