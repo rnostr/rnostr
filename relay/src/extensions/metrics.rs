@@ -3,9 +3,8 @@ use actix_web::{web, HttpResponse};
 use metrics::describe_counter;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::Deserialize;
-use serde_json::Value;
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 pub struct MetricsSetting {
     pub enabled: bool,
     pub auth: Option<String>,
@@ -29,8 +28,8 @@ impl Extension for Metrics {
         "metrics"
     }
 
-    fn setting(&mut self, _setting: &SettingWrapper) {
-        // setting.set_extension(self.name());
+    fn setting(&mut self, setting: &SettingWrapper) {
+        setting.write().load_extension::<MetricsSetting>("metrics");
     }
 
     fn config_web(&mut self, cfg: &mut actix_web::web::ServiceConfig) {
@@ -66,10 +65,8 @@ async fn route_metrics(
     query: web::Query<Info>,
 ) -> Result<HttpResponse, actix_web::Error> {
     let setting = app.setting.read();
-    if let Some(s) = setting.extensions.get("metrics") {
-        if s.get("enabled") == Some(&Value::Bool(true))
-            && s.get("auth") == Some(&Value::String(query.auth.clone().unwrap_or_default()))
-        {
+    if let Some(s) = setting.get_extension::<MetricsSetting>() {
+        if s.enabled && s.auth == query.auth {
             return Ok(HttpResponse::Ok()
                 .insert_header(("Content-Type", "text/plain"))
                 .body(handle.render()));
@@ -92,10 +89,10 @@ pub mod tests {
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
-        let data = create_test_app("")?.add_extension(Metrics::new());
+        let data = create_test_app("")?;
         {
             let mut w = data.setting.write();
-            w.extensions = serde_json::from_str(
+            w.extra = serde_json::from_str(
                 r#"{
                 "metrics": {
                     "enabled": true,
@@ -104,6 +101,7 @@ pub mod tests {
             }"#,
             )?;
         }
+        let data = data.add_extension(Metrics::new());
 
         let app = init_service(data.web_app()).await;
         sleep(Duration::from_millis(50)).await;

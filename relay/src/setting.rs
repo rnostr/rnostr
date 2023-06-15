@@ -2,11 +2,17 @@ use crate::Result;
 use config::{Config, File};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{
+    any::{Any, TypeId},
+    hash::{BuildHasherDefault, Hasher},
+};
+
 use tracing::{error, info};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -118,7 +124,28 @@ impl Default for Limitation {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+/// A hasher for `TypeId`s that takes advantage of its known characteristics.
+///
+/// Author of `anymap` crate has done research on the topic:
+/// https://github.com/chris-morgan/anymap/blob/2e9a5704/src/lib.rs#L599
+#[derive(Debug, Default)]
+struct NoOpHasher(u64);
+
+impl Hasher for NoOpHasher {
+    fn write(&mut self, _bytes: &[u8]) {
+        unimplemented!("This NoOpHasher can only handle u64s")
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.0 = i;
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Setting {
     pub information: Information,
     pub db: Db,
@@ -126,14 +153,47 @@ pub struct Setting {
     pub network: Network,
     pub limitation: Limitation,
 
-    /// flatten extensions setting
+    /// flatten extensions setting to json::Value
     #[serde(flatten)]
-    pub extensions: HashMap<String, HashMap<String, Value>>,
+    pub extra: HashMap<String, Value>,
+
+    /// extensions setting object
+    #[serde(skip)]
+    extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>, BuildHasherDefault<NoOpHasher>>,
 }
 
 pub type SettingWrapper = Arc<RwLock<Setting>>;
 
 impl Setting {
+    pub fn get_extra_json(&self, key: &str) -> Option<String> {
+        self.extra
+            .get(key)
+            .map(|h| serde_json::to_string(h).ok())
+            .flatten()
+    }
+
+    pub fn load_extension<'a, T: Send + Sync + 'static + DeserializeOwned + Default>(
+        &mut self,
+        key: &str,
+    ) {
+        let s = self
+            .get_extra_json(key)
+            .map(|s| serde_json::from_str::<T>(&s).ok())
+            .flatten()
+            .unwrap_or_default();
+        self.set_extension(s);
+    }
+
+    pub fn set_extension<T: Send + Sync + 'static>(&mut self, val: T) {
+        self.extensions.insert(TypeId::of::<T>(), Box::new(val));
+    }
+
+    pub fn get_extension<T: 'static>(&self) -> Option<&T> {
+        self.extensions
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref())
+    }
+
     pub fn default_wrapper() -> SettingWrapper {
         Arc::new(RwLock::new(Self::default()))
     }
