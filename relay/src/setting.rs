@@ -172,22 +172,20 @@ impl Setting {
             .flatten()
     }
 
-    pub fn load_extension<'a, T: Send + Sync + 'static + DeserializeOwned + Default>(
-        &mut self,
-        key: &str,
-    ) {
-        let s = self
-            .get_extra_json(key)
+    /// Parse extension setting from extra json string. see [`crate::extensions::Metrics`]
+    pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
+        self.get_extra_json(key)
             .map(|s| serde_json::from_str::<T>(&s).ok())
             .flatten()
-            .unwrap_or_default();
-        self.set_extension(s);
+            .unwrap_or_default()
     }
 
+    /// save extension setting
     pub fn set_extension<T: Send + Sync + 'static>(&mut self, val: T) {
         self.extensions.insert(TypeId::of::<T>(), Box::new(val));
     }
 
+    /// get extension setting
     pub fn get_extension<T: 'static>(&self) -> Option<&T> {
         self.extensions
             .get(&TypeId::of::<T>())

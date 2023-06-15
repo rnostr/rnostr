@@ -29,7 +29,9 @@ impl Extension for Metrics {
     }
 
     fn setting(&mut self, setting: &SettingWrapper) {
-        setting.write().load_extension::<MetricsSetting>("metrics");
+        let mut w = setting.write();
+        let s: MetricsSetting = w.parse_extension(self.name());
+        w.set_extension(s);
     }
 
     fn config_web(&mut self, cfg: &mut actix_web::web::ServiceConfig) {
