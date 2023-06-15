@@ -124,7 +124,7 @@ impl App {
     }
 
     pub fn add_extension<E: Extension + 'static>(self, mut ext: E) -> Self {
-        info!("Add extension {:?}", ext.name());
+        info!("Add extension {}", ext.name());
         ext.setting(&self.setting);
         {
             let mut w = self.extensions.write();

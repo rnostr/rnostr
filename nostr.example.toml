@@ -1,6 +1,10 @@
 # config relay information
 [information]
 name = "nostr relay"
+description = "A high-performance and scalable nostr relay written in Rust."
+software = "https://github.com/arronzhang/nostr"
+# pubkey = ""
+# contact = ""
 
 # config db
 [db]
@@ -56,5 +60,8 @@ max_event_time_older_than_now = 94608000
 # Events newer than this will be rejected. default 15 minutes
 max_event_time_newer_than_now = 900
 
-[auth]
+# Metrics extension, get the metrics data from https://example.com/metrics?auth=auth_key
+[metrics]
 enabled = true
+# change the auth key
+auth = "auth_key"

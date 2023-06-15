@@ -1,17 +1,26 @@
-use crate::Extension;
+use crate::{setting::SettingWrapper, App, Extension};
 use actix_web::{web, HttpResponse};
 use metrics::describe_counter;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use serde::Deserialize;
+use serde_json::Value;
 
-#[derive(Debug)]
-pub struct Metrics {
+#[derive(Deserialize, Default)]
+pub struct MetricsSetting {
     pub enabled: bool,
+    pub auth: Option<String>,
+}
+
+pub struct Metrics {
+    pub handle: web::Data<PrometheusHandle>,
 }
 
 impl Metrics {
     pub fn new() -> Self {
         describe_metrics();
-        Self { enabled: true }
+        Self {
+            handle: web::Data::new(create_prometheus_handle()),
+        }
     }
 }
 
@@ -20,9 +29,12 @@ impl Extension for Metrics {
         "metrics"
     }
 
+    fn setting(&mut self, _setting: &SettingWrapper) {
+        // setting.set_extension(self.name());
+    }
+
     fn config_web(&mut self, cfg: &mut actix_web::web::ServiceConfig) {
-        let data = web::Data::new(create_prometheus_handle());
-        cfg.app_data(data)
+        cfg.app_data(self.handle.clone())
             .service(web::resource("/metrics").route(web::get().to(route_metrics)));
     }
 }
@@ -43,12 +55,27 @@ pub fn create_prometheus_handle() -> PrometheusHandle {
         .unwrap()
 }
 
-pub async fn route_metrics(
-    data: web::Data<PrometheusHandle>,
+#[derive(Deserialize, Default)]
+struct Info {
+    auth: Option<String>,
+}
+
+async fn route_metrics(
+    handle: web::Data<PrometheusHandle>,
+    app: web::Data<App>,
+    query: web::Query<Info>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    Ok(HttpResponse::Ok()
-        .insert_header(("Content-Type", "text/plain"))
-        .body(data.render()))
+    let setting = app.setting.read();
+    if let Some(s) = setting.extensions.get("metrics") {
+        if s.get("enabled") == Some(&Value::Bool(true))
+            && s.get("auth") == Some(&Value::String(query.auth.clone().unwrap_or_default()))
+        {
+            return Ok(HttpResponse::Ok()
+                .insert_header(("Content-Type", "text/plain"))
+                .body(handle.render()));
+        }
+    }
+    Ok(HttpResponse::NotFound().finish())
 }
 
 #[cfg(test)]
@@ -66,6 +93,17 @@ pub mod tests {
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
         let data = create_test_app("")?.add_extension(Metrics::new());
+        {
+            let mut w = data.setting.write();
+            w.extensions = serde_json::from_str(
+                r#"{
+                "metrics": {
+                    "enabled": true,
+                    "auth": "auth_key"
+                }
+            }"#,
+            )?;
+        }
 
         let app = init_service(data.web_app()).await;
         sleep(Duration::from_millis(50)).await;
@@ -73,8 +111,11 @@ pub mod tests {
 
         let req = TestRequest::with_uri("/metrics").to_request();
         let res = app.call(req).await.unwrap();
-        assert_eq!(res.status(), 200);
+        assert_eq!(res.status(), 404);
 
+        let req = TestRequest::with_uri("/metrics?auth=auth_key").to_request();
+        let res = app.call(req).await.unwrap();
+        assert_eq!(res.status(), 200);
         let result = read_body(res).await;
         let result = String::from_utf8(result.to_vec())?;
         assert!(result.contains("test_metric"));
