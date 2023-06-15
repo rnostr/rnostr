@@ -4,7 +4,7 @@ use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,20 +12,43 @@ use std::{
     any::{Any, TypeId},
     hash::{BuildHasherDefault, Hasher},
 };
-
 use tracing::{error, info};
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub const CARGO_PKG_VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
+
+fn default_version() -> String {
+    CARGO_PKG_VERSION.map(ToOwned::to_owned).unwrap_or_default()
+}
+
+fn default_nips() -> Vec<u32> {
+    vec![1, 2, 4, 9, 11, 12, 15, 16, 20, 22, 26, 33, 40]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Information {
     pub name: String,
     pub description: String,
     pub pubkey: Option<String>,
     pub contact: Option<String>,
     pub software: String,
-
-    #[serde(skip_deserializing)]
+    #[serde(skip_deserializing, default = "default_version")]
     pub version: String,
-    // supported_nips, software, version
+    #[serde(skip_deserializing, default = "default_nips")]
+    pub supported_nips: Vec<u32>,
+}
+
+impl Default for Information {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            description: Default::default(),
+            pubkey: Default::default(),
+            contact: Default::default(),
+            software: Default::default(),
+            version: default_version(),
+            supported_nips: default_nips(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -165,6 +188,15 @@ pub struct Setting {
 pub type SettingWrapper = Arc<RwLock<Setting>>;
 
 impl Setting {
+    /// add supported nips
+    pub fn add_nip(&mut self, nip: u32) {
+        if self.information.supported_nips.contains(&nip) {
+            self.information.supported_nips.push(nip);
+            self.information.supported_nips.sort();
+        }
+    }
+
+    /// get extension setting as json from extra
     pub fn get_extra_json(&self, key: &str) -> Option<String> {
         self.extra
             .get(key)
@@ -198,7 +230,17 @@ impl Setting {
 
     /// information json
     pub fn render_information(&self) -> Result<String> {
-        Ok(serde_json::to_string_pretty(&self.information)?)
+        let info = &self.information;
+        Ok(serde_json::to_string_pretty(&json!({
+            "name": info.name,
+            "description": info.description,
+            "pubkey": info.pubkey,
+            "contact": info.contact,
+            "software": info.software,
+            "version": info.version,
+            "supported_nips": info.supported_nips,
+            "limitation": &self.limitation,
+        }))?)
     }
 
     pub fn read_wrapper<P: AsRef<Path>>(file: P) -> Result<SettingWrapper> {
@@ -273,6 +315,10 @@ mod tests {
 
     #[test]
     fn read() -> Result<()> {
+        let setting = Setting::default();
+        assert_eq!(setting.information.name, "");
+        assert!(setting.information.supported_nips.contains(&1));
+
         let file = Builder::new()
             .prefix("nostr-relay-config-test-read")
             .suffix(".toml")
@@ -281,10 +327,14 @@ mod tests {
 
         let setting = Setting::read(&file)?;
         assert_eq!(setting.information.name, "");
+        assert!(setting.information.supported_nips.contains(&1));
         fs::write(
             &file,
-            r#"[information]
+            r#"
+        [information]
         name = "nostr"
+        [network]
+        host = "127.0.0.1"
         "#,
         )?;
         let setting = Setting::read(&file)?;
@@ -300,7 +350,12 @@ mod tests {
             .tempfile()?;
 
         let (setting, _watcher) = Setting::watch(&file, |_s| {})?;
-        assert_eq!(setting.read().information.name, "");
+        {
+            let r = setting.read();
+            assert_eq!(r.information.name, "");
+            assert!(r.information.supported_nips.contains(&1));
+        }
+
         fs::write(
             &file,
             r#"[information]
@@ -309,7 +364,11 @@ mod tests {
         )?;
         sleep(Duration::from_millis(100));
         // println!("read {:?} {:?}", setting.read(), file);
-        assert_eq!(setting.read().information.name, "nostr".to_string());
+        {
+            let r = setting.read();
+            assert_eq!(r.information.name, "nostr");
+            assert!(r.information.supported_nips.contains(&1));
+        }
         Ok(())
     }
 }

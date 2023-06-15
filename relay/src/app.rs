@@ -200,6 +200,7 @@ pub mod tests {
 
     use crate::create_test_app;
     use actix_rt::time::sleep;
+    use actix_test::read_body;
     use actix_web::{
         dev::Service,
         test::{init_service, TestRequest},
@@ -223,7 +224,10 @@ pub mod tests {
             res.headers().get(actix_http::header::CONTENT_TYPE).unwrap(),
             "application/nostr+json"
         );
-
+        let result = read_body(res).await;
+        let result = String::from_utf8(result.to_vec())?;
+        assert!(result.contains("supported_nips"));
+        assert!(result.contains("limitation"));
         Ok(())
     }
 
