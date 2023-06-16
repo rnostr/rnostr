@@ -115,6 +115,19 @@ pub enum IncomingMessage {
     Unknown(String, Vec<Value>),
 }
 
+impl IncomingMessage {
+    pub fn command(&self) -> &str {
+        match self {
+            IncomingMessage::Event(_) => "EVENT",
+            IncomingMessage::Close(_) => "CLOSE",
+            IncomingMessage::Req(_) => "REQ",
+            IncomingMessage::Auth(_) => "AUTH",
+            IncomingMessage::Count(_) => "COUNT",
+            IncomingMessage::Unknown(cmd, _) => cmd,
+        }
+    }
+}
+
 // https://github.com/serde-rs/serde/issues/1337
 impl<'de> Deserialize<'de> for IncomingMessage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
