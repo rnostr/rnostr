@@ -1,16 +1,21 @@
 use crate::{message::*, Result};
 use actix::prelude::*;
-use nostr_db::Db;
+use nostr_db::{now, Db, Event};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, error, info};
 
-/// Single-threaded write events
+/// Single-threaded write events, delete expired events
 /// Batch write can improve tps
+
+const WRITE_INTERVAL_MS: u64 = 100;
+const DEL_INTERVAL_SECONDS: u64 = 60;
 
 pub struct Writer {
     pub db: Arc<Db>,
     pub addr: Recipient<WriteEventResult>,
     pub events: Vec<WriteEvent>,
+    pub write_interval_ms: u64,
+    pub del_interval_seconds: u64,
 }
 
 impl Writer {
@@ -19,10 +24,12 @@ impl Writer {
             db,
             addr,
             events: Vec::new(),
+            write_interval_ms: WRITE_INTERVAL_MS,
+            del_interval_seconds: DEL_INTERVAL_SECONDS,
         }
     }
 
-    fn write(&mut self) -> Result<()> {
+    pub fn write(&mut self) -> Result<()> {
         if self.events.len() > 0 {
             debug!("write events: {:?}", self.events);
             let mut writer = self.db.writer()?;
@@ -49,26 +56,54 @@ impl Writer {
         Ok(())
     }
 
-    fn do_write(&mut self) {
+    pub fn do_write(&mut self) {
         if let Err(err) = self.write() {
             error!(error = err.to_string(), "write events error");
         }
     }
-}
 
-const WRITE_INTERVAL: u64 = 100;
+    pub fn del_expired(&self) -> Result<()> {
+        let reader = self.db.reader()?;
+        let iter = self.db.iter_expiration::<Event, _>(&reader, Some(now()))?;
+        let mut ids = vec![];
+        for event in iter {
+            let event = event?;
+            ids.push(event.id().clone());
+        }
+        self.db.batch_del(ids)?;
+        Ok(())
+    }
+
+    pub fn do_del_expired(&self) {
+        if let Err(err) = self.del_expired() {
+            error!(error = err.to_string(), "delete expired events error");
+        }
+    }
+}
 
 impl Actor for Writer {
     type Context = Context<Self>;
     fn started(&mut self, ctx: &mut Self::Context) {
         info!("Actor writer started");
-        ctx.run_interval(Duration::from_millis(WRITE_INTERVAL), |act, _ctx| {
-            act.do_write();
-        });
+        // save event every 100ms
+        ctx.run_interval(
+            Duration::from_millis(self.write_interval_ms),
+            |act, _ctx| {
+                act.do_write();
+            },
+        );
+        // delete expired events every minute
+        ctx.run_interval(
+            Duration::from_secs(self.del_interval_seconds),
+            |act, _ctx| {
+                act.do_del_expired();
+            },
+        );
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         info!("Actor writer stopped");
+        // save event when stopped
         self.do_write();
     }
 }
@@ -136,7 +171,7 @@ mod tests {
                 .await?;
         }
 
-        sleep(Duration::from_millis(WRITE_INTERVAL * 3)).await;
+        sleep(Duration::from_millis(WRITE_INTERVAL_MS * 3)).await;
         let r = messages.read();
         assert_eq!(r.len(), 4);
         Ok(())
