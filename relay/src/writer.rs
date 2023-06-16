@@ -42,7 +42,7 @@ impl Writer {
                     }),
                     Err(err) => {
                         error!(error = err.to_string(), "write event error");
-                        let eid = hex::encode(event.event.id());
+                        let eid = event.event.id_str();
                         self.addr.do_send(WriteEventResult::Message {
                             id: event.id,
                             event: event.event,

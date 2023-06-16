@@ -95,7 +95,7 @@ impl Handler<ClientMessage> for Server {
             IncomingMessage::Event(event) => {
                 // don't save ephemeral event
                 if event.index().is_ephemeral() {
-                    let event_id = hex::encode(event.id());
+                    let event_id = event.id_str();
                     self.subscriber.do_send(Dispatch { id: msg.id, event });
                     self.send_to_client(msg.id, OutgoingMessage::ok(&event_id, true, ""));
                 } else {
@@ -162,7 +162,7 @@ impl Handler<WriteEventResult> for Server {
     fn handle(&mut self, msg: WriteEventResult, _: &mut Self::Context) {
         match msg {
             WriteEventResult::Write { id, event, result } => {
-                let event_id = hex::encode(event.id());
+                let event_id = event.id_str();
                 let out_msg = match &result {
                     CheckEventResult::Ok(_num) => OutgoingMessage::ok(&event_id, true, ""),
                     CheckEventResult::Duplicate => {
