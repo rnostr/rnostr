@@ -428,8 +428,16 @@ impl Event {
         &self.index.id
     }
 
+    pub fn id_str(&self) -> String {
+        hex::encode(&self.index.id)
+    }
+
     pub fn pubkey(&self) -> &Vec<u8> {
         &self.index.pubkey
+    }
+
+    pub fn pubkey_str(&self) -> String {
+        hex::encode(&self.index.pubkey)
     }
 
     pub fn created_at(&self) -> u64 {
