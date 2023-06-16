@@ -1,9 +1,10 @@
-use crate::{message::*, App, Server};
+use crate::{hash::NoOpHasherDefault, message::*, App, Server};
 use actix::prelude::*;
 use actix_web::web;
 use actix_web_actors::ws;
 use metrics::{decrement_gauge, increment_counter, increment_gauge};
 use std::{
+    any::{Any, TypeId},
     collections::HashMap,
     time::{Duration, Instant},
 };
@@ -33,13 +34,30 @@ pub struct Session {
     app: web::Data<App>,
 
     /// Simple store for save extension data
-    pub data: HashMap<String, String>,
+    data: HashMap<TypeId, Box<dyn Any>, NoOpHasherDefault>,
 }
 
 impl Session {
+    /// save extension data
+    pub fn set<T: 'static>(&mut self, val: T) {
+        self.data.insert(TypeId::of::<T>(), Box::new(val));
+    }
+
+    /// get extension data
+    pub fn get<T: 'static>(&self) -> Option<&T> {
+        self.data
+            .get(&TypeId::of::<T>())
+            .and_then(|boxed| boxed.downcast_ref())
+    }
+
     /// Get session id
     pub fn id(&self) -> usize {
         self.id
+    }
+
+    /// Get ip
+    pub fn ip(&self) -> &String {
+        &self.ip
     }
 
     pub fn new(ip: String, app: web::Data<App>) -> Session {
@@ -55,7 +73,7 @@ impl Session {
             heartbeat_timeout,
             heartbeat_interval,
             app,
-            data: HashMap::new(),
+            data: HashMap::default(),
         }
     }
 
@@ -158,7 +176,6 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 let text = text.to_string();
                 let msg = serde_json::from_str::<IncomingMessage>(&text);
                 match msg {
-                    // TODO: validate
                     Ok(msg) => {
                         let mut msg = ClientMessage {
                             id: self.id,
@@ -168,7 +185,15 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                         {
                             let r = self.app.setting.read();
                             if let Err(err) = msg.validate(&r.limitation) {
-                                ctx.text(OutgoingMessage::notice(&err.to_string()));
+                                if let IncomingMessage::Event(event) = &msg.msg {
+                                    ctx.text(OutgoingMessage::ok(
+                                        &event.id_str(),
+                                        false,
+                                        &err.to_string(),
+                                    ));
+                                } else {
+                                    ctx.text(OutgoingMessage::notice(&err.to_string()));
+                                }
                                 return;
                             }
                         }
