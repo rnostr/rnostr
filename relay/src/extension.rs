@@ -14,6 +14,12 @@ pub enum ExtensionMessageResult {
     Ignore,
 }
 
+impl From<OutgoingMessage> for ExtensionMessageResult {
+    fn from(value: OutgoingMessage) -> Self {
+        Self::Stop(value)
+    }
+}
+
 /// Extension for user session
 pub trait Extension: Send + Sync {
     fn name(&self) -> &'static str;

@@ -65,3 +65,21 @@ max_event_time_newer_than_now = 900
 enabled = true
 # change the auth key
 auth = "auth_key"
+
+# Auth extension
+[auth]
+enabled = true
+
+# [auth.read]
+# ip_whitelist = ["127.0.0.1"]
+# ip_blacklist = ["127.0.0.1"]
+# need auth when list provide
+# pubkey_whitelist = ["xxxxxx"]
+# pubkey_blacklist = ["xxxx"]
+
+# [auth.write]
+# ip_whitelist = ["127.0.0.1"]
+# ip_blacklist = ["127.0.0.1"]
+# need auth when list provide
+# pubkey_whitelist = ["xxxxxx"]
+# pubkey_blacklist = ["xxxx"]
