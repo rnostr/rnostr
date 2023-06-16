@@ -12,6 +12,8 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("invalid: {0}")]
     Invalid(String),
+    #[error("{0}")]
+    Message(String),
 }
 
 impl actix_web::ResponseError for Error {}
@@ -21,6 +23,7 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 mod app;
 mod extension;
 pub mod extensions;
+mod hash;
 pub mod message;
 mod reader;
 mod server;

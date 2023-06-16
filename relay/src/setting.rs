@@ -1,3 +1,4 @@
+use crate::hash::NoOpHasherDefault;
 use crate::Result;
 use config::{Config, File};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -5,12 +6,11 @@ use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::{
     any::{Any, TypeId},
-    hash::{BuildHasherDefault, Hasher},
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 use tracing::{error, info};
 
@@ -147,27 +147,6 @@ impl Default for Limitation {
     }
 }
 
-/// A hasher for `TypeId`s that takes advantage of its known characteristics.
-///
-/// Author of `anymap` crate has done research on the topic:
-/// https://github.com/chris-morgan/anymap/blob/2e9a5704/src/lib.rs#L599
-#[derive(Debug, Default)]
-struct NoOpHasher(u64);
-
-impl Hasher for NoOpHasher {
-    fn write(&mut self, _bytes: &[u8]) {
-        unimplemented!("This NoOpHasher can only handle u64s")
-    }
-
-    fn write_u64(&mut self, i: u64) {
-        self.0 = i;
-    }
-
-    fn finish(&self) -> u64 {
-        self.0
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Setting {
     pub information: Information,
@@ -182,7 +161,7 @@ pub struct Setting {
 
     /// extensions setting object
     #[serde(skip)]
-    extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>, BuildHasherDefault<NoOpHasher>>,
+    extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>, NoOpHasherDefault>,
 }
 
 pub type SettingWrapper = Arc<RwLock<Setting>>;
