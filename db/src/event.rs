@@ -5,7 +5,7 @@ use rkyv::{
     vec::ArchivedVec, AlignedVec, Archive, Deserialize as RkyvDeserialize,
     Serialize as RkyvSerialize,
 };
-use secp256k1::{schnorr::Signature, Message, XOnlyPublicKey, SECP256K1};
+use secp256k1::{schnorr::Signature, KeyPair, Message, XOnlyPublicKey, SECP256K1};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -304,6 +304,30 @@ impl Event {
         };
         Ok(event)
     }
+
+    pub fn create(
+        key_pair: &KeyPair,
+        created_at: u64,
+        kind: u64,
+        tags: Vec<Vec<String>>,
+        content: String,
+    ) -> Result<Self, Error> {
+        let pubkey = XOnlyPublicKey::from_keypair(&key_pair)
+            .0
+            .serialize()
+            .to_vec();
+        let id = hash(&pubkey, created_at, kind, &tags, &content);
+        let sig = SECP256K1.sign_schnorr(&Message::from_slice(&id)?, &key_pair);
+        Self::new(
+            id,
+            pubkey,
+            created_at,
+            kind,
+            tags,
+            content,
+            sig.as_ref().to_vec(),
+        )
+    }
 }
 
 impl AsRef<Event> for Event {
@@ -464,19 +488,28 @@ pub fn now() -> u64 {
         .as_secs()
 }
 
+fn hash(
+    pubkey: &[u8],
+    created_at: u64,
+    kind: u64,
+    tags: &Vec<Vec<String>>,
+    content: &String,
+) -> Vec<u8> {
+    let json: Value = json!([0, hex::encode(pubkey), created_at, kind, tags, content]);
+    let mut hasher = Sha256::new();
+    hasher.update(json.to_string());
+    hasher.finalize().to_vec()
+}
+
 impl Event {
     pub fn hash(&self) -> Vec<u8> {
-        let json: Value = json!([
-            0,
-            hex::encode(self.pubkey()),
+        hash(
+            self.pubkey(),
             self.created_at(),
             self.kind(),
-            self.tags(),
-            self.content()
-        ]);
-        let mut hasher = Sha256::new();
-        hasher.update(json.to_string());
-        hasher.finalize().to_vec()
+            &self.tags(),
+            &self.content(),
+        )
     }
 
     pub fn verify_id(&self) -> Result<(), Error> {
@@ -605,6 +638,7 @@ fn verify_sign(sig: &[u8], pk: &[u8], msg: &[u8]) -> Result<(), Error> {
 mod tests {
     use super::*;
     use anyhow::Result;
+    use secp256k1::rand::thread_rng;
     use serde_json::Value;
     use std::str::FromStr;
 
@@ -782,6 +816,16 @@ mod tests {
             .to_string()
             .contains("older"));
 
+        Ok(())
+    }
+
+    #[test]
+    fn create() -> Result<()> {
+        let mut rng = thread_rng();
+        let key_pair = KeyPair::new_global(&mut rng);
+        let event = Event::create(&key_pair, 0, 1, vec![], "".to_owned())?;
+        assert!(event.verify_sign().is_ok());
+        assert!(event.verify_id().is_ok());
         Ok(())
     }
 }

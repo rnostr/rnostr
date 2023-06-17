@@ -5,6 +5,7 @@ mod error;
 mod event;
 mod filter;
 mod key;
+pub use secp256k1;
 
 pub use {
     db::CheckEventResult, db::Db, db::Iter, error::Error, event::now, event::ArchivedEventIndex,
