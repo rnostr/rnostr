@@ -14,7 +14,7 @@ use tracing::info;
 
 pub mod route {
     use crate::{App, Session};
-    use actix_http::header::{ACCEPT, UPGRADE};
+    use actix_http::header::{ACCEPT, LOCATION, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
 
@@ -64,7 +64,14 @@ pub mod route {
             }
         }
 
-        Ok(HttpResponse::Ok().body("Hello World!"))
+        let s = data.setting.read();
+        if let Some(site) = &s.network.index_redirect_to {
+            Ok(HttpResponse::Found()
+                .append_header((LOCATION, site.as_str()))
+                .finish())
+        } else {
+            Ok(HttpResponse::Ok().body(s.information.description.clone()))
+        }
     }
 }
 

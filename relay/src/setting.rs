@@ -95,6 +95,9 @@ pub struct Network {
     pub heartbeat_interval: u64,
 
     pub real_ip_header: Option<Vec<String>>,
+
+    /// redirect to other site when user access the http index page
+    pub index_redirect_to: Option<String>,
 }
 
 impl Default for Network {
@@ -105,6 +108,7 @@ impl Default for Network {
             heartbeat_interval: 60,
             heartbeat_timeout: 120,
             real_ip_header: None,
+            index_redirect_to: None,
         }
     }
 }
