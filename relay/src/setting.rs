@@ -186,7 +186,13 @@ impl Setting {
     /// Parse extension setting from extra json string. see [`crate::extensions::Metrics`]
     pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
         self.get_extra_json(key)
-            .map(|s| serde_json::from_str::<T>(&s).ok())
+            .map(|s| {
+                let r = serde_json::from_str::<T>(&s);
+                if let Err(err) = &r {
+                    error!(error = err.to_string(), "failed to parse {:?} setting", key);
+                }
+                r.ok()
+            })
             .flatten()
             .unwrap_or_default()
     }
