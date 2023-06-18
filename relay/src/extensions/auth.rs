@@ -201,6 +201,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn verify() -> Result<()> {
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            &"127.0.0.1".to_owned()
+        )
+        .is_ok());
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            &"127.0.0.2".to_owned()
+        )
+        .is_err());
+
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                ip_blacklist: Some(vec!["127.0.0.1".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            &"127.0.0.1".to_owned()
+        )
+        .is_err());
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                ip_blacklist: Some(vec!["127.0.0.1".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            &"127.0.0.2".to_owned()
+        )
+        .is_ok());
+
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                pubkey_whitelist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            Some(&"xx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_ok());
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                pubkey_whitelist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            Some(&"xxxx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_err());
+
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                pubkey_blacklist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            Some(&"xx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_err());
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                pubkey_blacklist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            Some(&"xxxx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_ok());
+        Ok(())
+    }
+
     #[actix_rt::test]
     async fn auth() -> Result<()> {
         let mut rng = thread_rng();
