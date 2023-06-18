@@ -68,7 +68,7 @@ auth = "auth_key"
 
 # Auth extension
 [auth]
-enabled = true
+enabled = false
 
 # [auth.read]
 # ip_whitelist = ["127.0.0.1"]

@@ -24,6 +24,7 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
         let app_data = App::create(Some(config), watch, None).unwrap();
         app_data
             .add_extension(extensions::Metrics::new())
+            .add_extension(extensions::Auth::new())
             .web_server()
             .unwrap()
             .await
