@@ -71,7 +71,9 @@ auth = "auth_key"
 enabled = false
 
 # [auth.read]
+# only the list IP are allowed to read
 # ip_whitelist = ["127.0.0.1"]
+# only the list IP are denied to read
 # ip_blacklist = ["127.0.0.1"]
 # need auth when list provide
 # pubkey_whitelist = ["xxxxxx"]
