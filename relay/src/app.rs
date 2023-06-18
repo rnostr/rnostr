@@ -144,7 +144,7 @@ impl App {
             InitError = (),
         >,
     > {
-        create_app(web::Data::new(self))
+        create_web_app(web::Data::new(self))
     }
 
     pub fn web_server(self) -> Result<actix_server::Server, std::io::Error> {
@@ -159,14 +159,14 @@ impl App {
         drop(r);
         info!("Start http server {}:{}", host, port);
         let data = web::Data::new(self);
-        Ok(HttpServer::new(move || create_app(data.clone()))
+        Ok(HttpServer::new(move || create_web_app(data.clone()))
             .workers(num)
             .bind((host, port))?
             .run())
     }
 }
 
-fn create_app(
+pub fn create_web_app(
     data: web::Data<App>,
 ) -> WebApp<
     impl ServiceFactory<
