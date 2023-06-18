@@ -32,6 +32,8 @@ mod setting;
 mod subscriber;
 mod writer;
 
+pub use metrics;
+pub use nostr_db as db;
 pub use {
     app::*, extension::*, reader::Reader, server::Server, server::*, session::Session,
     setting::Setting, subscriber::Subscriber, writer::Writer,
