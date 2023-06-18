@@ -479,6 +479,10 @@ impl Event {
     pub fn content(&self) -> &String {
         &self.content
     }
+
+    pub fn sig(&self) -> &[u8] {
+        &self.sig
+    }
 }
 
 pub fn now() -> u64 {
