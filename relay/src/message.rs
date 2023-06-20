@@ -129,64 +129,63 @@ impl IncomingMessage {
 }
 
 // https://github.com/serde-rs/serde/issues/1337
+
+struct MessageVisitor(PhantomData<()>);
+
+impl<'de> Visitor<'de> for MessageVisitor {
+    type Value = IncomingMessage;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("sequence")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let t: &str = seq
+            .next_element()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+        match t {
+            "EVENT" => Ok(IncomingMessage::Event(
+                seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?,
+            )),
+            "CLOSE" => Ok(IncomingMessage::Close(
+                seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?,
+            )),
+            "REQ" => {
+                let t = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let r = Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(IncomingMessage::Req(Subscription { id: t, filters: r }))
+            }
+            "AUTH" => Ok(IncomingMessage::Auth(
+                seq.next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?,
+            )),
+            "COUNT" => {
+                let t = seq
+                    .next_element()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                let r = Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(IncomingMessage::Count(Subscription { id: t, filters: r }))
+            }
+            _ => Ok(IncomingMessage::Unknown(
+                t.to_string(),
+                Vec::<Value>::deserialize(de::value::SeqAccessDeserializer::new(seq))?,
+            )),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for IncomingMessage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct MessageVisitor(PhantomData<()>);
-
-        impl<'de> Visitor<'de> for MessageVisitor {
-            type Value = IncomingMessage;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("sequence")
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let t: &str = seq
-                    .next_element()?
-                    .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                match t {
-                    "EVENT" => Ok(IncomingMessage::Event(
-                        seq.next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(0, &self))?,
-                    )),
-                    "CLOSE" => Ok(IncomingMessage::Close(
-                        seq.next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(0, &self))?,
-                    )),
-                    "REQ" => {
-                        let t = seq
-                            .next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                        let r =
-                            Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-                        Ok(IncomingMessage::Req(Subscription { id: t, filters: r }))
-                    }
-                    "AUTH" => Ok(IncomingMessage::Auth(
-                        seq.next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(0, &self))?,
-                    )),
-                    "COUNT" => {
-                        let t = seq
-                            .next_element()?
-                            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                        let r =
-                            Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-                        Ok(IncomingMessage::Count(Subscription { id: t, filters: r }))
-                    }
-                    _ => Ok(IncomingMessage::Unknown(
-                        t.to_string(),
-                        Vec::<Value>::deserialize(de::value::SeqAccessDeserializer::new(seq))?,
-                    )),
-                }
-            }
-        }
-
         deserializer.deserialize_seq(MessageVisitor(PhantomData))
     }
 }
