@@ -74,17 +74,40 @@ auth = "auth_key"
 enabled = false
 
 # [auth.read]
-# only the list IP are allowed to read
+# # only the list IP are allowed to read
 # ip_whitelist = ["127.0.0.1"]
-# only the list IP are denied to read
+# # only the list IP are denied to read
 # ip_blacklist = ["127.0.0.1"]
-# need auth when list provide
+# # need auth when list provide
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
 
 # [auth.write]
 # ip_whitelist = ["127.0.0.1"]
 # ip_blacklist = ["127.0.0.1"]
-# need auth when list provide
+# # need auth when list provide
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
+
+# Rate limiter extension
+[rate_limiter]
+enabled = false
+
+# # interval at second for clearing invalid data to free up memory.
+# # 0 will be converted to default 60
+# clear_interval = 60
+
+# # rate limiter ruler list when write event
+# [[rate_limiter.event]]
+# description = "allow only ten write events per minute"
+# period = 60
+# limit = 10
+
+# # only limit for kinds
+# # support kind list: [1, 2, 3]
+# # kind ranges included(start) to excluded(end): [[0, 10000], [30000, 40000]]
+# # mixed: [1, 2, [30000, 40000]]
+# kinds = [[0, 40000]]
+
+# # skip when ip in whitelist
+# ip_whitelist = ["127.0.0.1"]

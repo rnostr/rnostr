@@ -16,6 +16,7 @@ actix-web = "4.3.1"
 actix-web-actors = "4.2.0"
 bytestring = "1.3.0"
 config = { version = "0.13.3", features = ["toml"], default-features = false }
+governor = "0.5.1"
 hex = "0.4.3"
 metrics = "0.21.0"
 metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = ["push-gateway"] }
@@ -26,6 +27,7 @@ num_cpus = "1.15.0"
 parking_lot = "0.12.1"
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
+serde_with = "3.0.0"
 thiserror = "1.0.40"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.17"
