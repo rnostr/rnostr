@@ -8,6 +8,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 #[derive(Deserialize, Default, Debug)]
+#[serde(default)]
 pub struct Permission {
     pub ip_whitelist: Option<Vec<String>>,
     pub pubkey_whitelist: Option<Vec<String>>,
@@ -16,6 +17,7 @@ pub struct Permission {
 }
 
 #[derive(Deserialize, Default, Debug)]
+#[serde(default)]
 pub struct AuthSetting {
     pub enabled: bool,
     /// read auth: ["REQ"]
