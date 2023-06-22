@@ -27,11 +27,11 @@ port = 7707
 
 # heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
 # How long before lack of client response causes a timeout
-# heartbeat_timeout = 120
+# heartbeat_timeout = "2m"
 
 # heartbeat interval (default 60 seconds)
 # How often heartbeat pings are sent
-# heartbeat_interval = 60
+# heartbeat_interval = "1m"
 
 # config thread (restart required)
 [thread]
@@ -96,13 +96,13 @@ enabled = false
 enabled = false
 
 # # interval at second for clearing invalid data to free up memory.
-# # 0 will be converted to default 60
-# clear_interval = 60
+# # 0 will be converted to default 60 seconds
+# clear_interval = "60s"
 
 # # rate limiter ruler list when write event per user client IP
 # [[rate_limiter.event]]
 # description = "allow only ten events per minute"
-# period = 60
+# period = "60s"
 # limit = 10
 
 # # only limit for kinds
@@ -116,6 +116,6 @@ enabled = false
 
 # [[rate_limiter.event]]
 # description = "allow only five write events per minute when event kind between 0 to 10000"
-# period = 60
+# period = "60s"
 # limit = 5
 # kinds = [[0, 10000]]

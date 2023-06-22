@@ -247,7 +247,7 @@ mod tests {
         let receiver = receiver.start();
         let addr = receiver.recipient();
 
-        let server = Server::create_with(db, Setting::default_wrapper());
+        let server = Server::create_with(db, Setting::default().wrapper());
 
         let id = server.send(Connect { addr }).await?;
         assert_eq!(id, 1);

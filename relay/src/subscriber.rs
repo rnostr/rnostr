@@ -128,7 +128,7 @@ mod tests {
         let receiver = receiver.start();
         let addr = receiver.recipient();
 
-        let subscriber = Subscriber::new(addr.clone(), Setting::default_wrapper()).start();
+        let subscriber = Subscriber::new(addr.clone(), Setting::default().wrapper()).start();
 
         subscriber
             .send(Dispatch {

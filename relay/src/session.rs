@@ -62,8 +62,8 @@ impl Session {
 
     pub fn new(ip: String, app: web::Data<App>) -> Session {
         let setting = app.setting.read();
-        let heartbeat_timeout = Duration::from_secs(setting.network.heartbeat_timeout);
-        let heartbeat_interval = Duration::from_secs(setting.network.heartbeat_interval);
+        let heartbeat_timeout = setting.network.heartbeat_timeout;
+        let heartbeat_interval = setting.network.heartbeat_interval;
         drop(setting);
         Self {
             id: 0,
@@ -277,8 +277,8 @@ mod tests {
             let data = create_test_app("session").unwrap();
             {
                 let mut w = data.setting.write();
-                w.network.heartbeat_interval = 1;
-                w.network.heartbeat_timeout = 20;
+                w.network.heartbeat_interval = Duration::from_secs(1);
+                w.network.heartbeat_timeout = Duration::from_secs(20);
             }
             data.web_app()
         });
@@ -305,8 +305,8 @@ mod tests {
             let data = create_test_app("session").unwrap();
             {
                 let mut w = data.setting.write();
-                w.network.heartbeat_interval = 1;
-                w.network.heartbeat_timeout = 2;
+                w.network.heartbeat_interval = Duration::from_secs(1);
+                w.network.heartbeat_timeout = Duration::from_secs(2);
             }
             data.web_app()
         });

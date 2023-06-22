@@ -104,10 +104,10 @@ impl App {
         } else {
             if let Some(path) = setting_path {
                 info!("Load config {:?}", path.as_ref());
-                (Setting::read_wrapper(path.as_ref())?, None)
+                (Setting::from_file(path.as_ref())?.wrapper(), None)
             } else {
                 info!("Load default config");
-                (Setting::default_wrapper(), None)
+                (Setting::default().wrapper(), None)
             }
         };
 

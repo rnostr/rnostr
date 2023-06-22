@@ -1,11 +1,11 @@
-use crate::hash::NoOpHasherDefault;
-use crate::Result;
-use config::{Config, File};
+use crate::{duration, hash::NoOpHasherDefault, Result};
+use config::{Config, File, FileFormat};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::time::Duration;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -24,16 +24,17 @@ fn default_nips() -> Vec<u32> {
     vec![1, 2, 4, 9, 11, 12, 15, 16, 20, 22, 26, 33, 40]
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct Information {
     pub name: String,
     pub description: String,
     pub pubkey: Option<String>,
     pub contact: Option<String>,
     pub software: String,
-    #[serde(skip_deserializing, default = "default_version")]
+    #[serde(skip_deserializing)]
     pub version: String,
-    #[serde(skip_deserializing, default = "default_nips")]
+    #[serde(skip_deserializing)]
     pub supported_nips: Vec<u32>,
 }
 
@@ -51,7 +52,8 @@ impl Default for Information {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct Db {
     pub path: PathBuf,
 }
@@ -65,7 +67,8 @@ impl Default for Db {
 }
 
 /// number of threads config
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct Thread {
     /// number of http server threads
     pub http: usize,
@@ -80,7 +83,8 @@ impl Default for Thread {
 }
 
 /// network config
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct Network {
     /// server bind host
     pub host: String,
@@ -88,11 +92,13 @@ pub struct Network {
     pub port: u16,
     /// heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
     /// How long before lack of client response causes a timeout
-    pub heartbeat_timeout: u64,
+    #[serde(with = "duration")]
+    pub heartbeat_timeout: Duration,
 
     /// heartbeat interval
     /// How often heartbeat pings are sent
-    pub heartbeat_interval: u64,
+    #[serde(with = "duration")]
+    pub heartbeat_interval: Duration,
 
     pub real_ip_header: Option<Vec<String>>,
 
@@ -105,15 +111,16 @@ impl Default for Network {
         Self {
             host: "127.0.0.1".to_string(),
             port: 7707,
-            heartbeat_interval: 60,
-            heartbeat_timeout: 120,
+            heartbeat_interval: Duration::from_secs(60),
+            heartbeat_timeout: Duration::from_secs(120),
             real_ip_header: None,
             index_redirect_to: None,
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(default)]
 pub struct Limitation {
     /// this is the maximum number of bytes for incoming JSON. default 512K
     pub max_message_length: usize,
@@ -152,6 +159,7 @@ impl Default for Limitation {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Setting {
     pub information: Information,
     pub db: Db,
@@ -166,6 +174,17 @@ pub struct Setting {
     /// extensions setting object
     #[serde(skip)]
     extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>, NoOpHasherDefault>,
+}
+
+impl PartialEq for Setting {
+    fn eq(&self, other: &Self) -> bool {
+        self.information == other.information
+            && self.db == other.db
+            && self.thread == other.thread
+            && self.network == other.network
+            && self.limitation == other.limitation
+            && self.extra == other.extra
+    }
 }
 
 pub type SettingWrapper = Arc<RwLock<Setting>>;
@@ -213,8 +232,8 @@ impl Setting {
             .and_then(|boxed| boxed.downcast_ref())
     }
 
-    pub fn default_wrapper() -> SettingWrapper {
-        Arc::new(RwLock::new(Self::default()))
+    pub fn wrapper(self) -> SettingWrapper {
+        Arc::new(RwLock::new(self))
     }
 
     /// information json
@@ -232,30 +251,47 @@ impl Setting {
         }))?)
     }
 
-    pub fn read_wrapper<P: AsRef<Path>>(file: P) -> Result<SettingWrapper> {
-        Ok(Arc::new(RwLock::new(Self::read(file)?)))
-    }
-
-    pub fn read<P: AsRef<Path>>(file: P) -> Result<Self> {
-        let def = Self::default();
-
+    /// config from file
+    pub fn from_file<P: AsRef<Path>>(file: P) -> Result<Self> {
         let builder = Config::builder();
         let config = builder
-            // use defaults
-            .add_source(Config::try_from(&def)?)
+            // Use serde default feature, ignore the following code
+            // // use defaults
+            // .add_source(Config::try_from(&Self::default())?)
             // override with file contents
             .add_source(File::with_name(file.as_ref().to_str().unwrap()))
             .build()?;
-
-        let setting: Setting = config.try_deserialize()?;
+        let mut setting: Setting = config.try_deserialize()?;
+        setting.correct();
         Ok(setting)
     }
 
+    /// config from str
+    pub fn from_str(s: &str, format: FileFormat) -> Result<Self> {
+        let builder = Config::builder();
+        let config = builder.add_source(File::from_str(s, format)).build()?;
+        let mut setting: Setting = config.try_deserialize()?;
+        setting.correct();
+        Ok(setting)
+    }
+
+    fn correct(&mut self) {
+        if self.network.heartbeat_timeout.is_zero()
+            || self.network.heartbeat_interval.is_zero()
+            || self.network.heartbeat_timeout <= self.network.heartbeat_interval
+        {
+            error!("network heartbeat_timeout must bigger than heartbeat_interval and both must be greater than 0, use defaults");
+            self.network.heartbeat_interval = Duration::from_secs(60);
+            self.network.heartbeat_timeout = Duration::from_secs(120);
+        }
+    }
+
+    /// config from file and watch file update then reload
     pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
         file: P,
         f: F,
     ) -> Result<(SettingWrapper, RecommendedWatcher)> {
-        let setting = Self::read(&file)?;
+        let setting = Self::from_file(&file)?;
         let setting = Arc::new(RwLock::new(setting));
         let c_file = file.as_ref().to_path_buf();
         let c_setting = Arc::clone(&setting);
@@ -268,7 +304,7 @@ impl Setting {
             match result {
                 Ok(event) => {
                     if event.kind.is_modify() {
-                        match Self::read(&c_file) {
+                        match Self::from_file(&c_file) {
                             Ok(new_setting) => {
                                 info!("Reload config success {:?}", c_file);
                                 {
@@ -299,8 +335,33 @@ impl Setting {
 mod tests {
     use super::*;
     use anyhow::Result;
+    use config::FileFormat;
     use std::{fs, thread::sleep, time::Duration};
     use tempfile::Builder;
+
+    #[test]
+    fn der() -> Result<()> {
+        let json = r#"{
+            "network": {"port": 1},
+            "information": {"name": "test"},
+            "db": {},
+            "thread": {"http": 1},
+            "limitation": {}
+        }"#;
+
+        let mut def = Setting::default();
+        def.network.port = 1;
+        def.information.name = "test".to_owned();
+        def.thread.http = 1;
+
+        let s2 = serde_json::from_str::<Setting>(json)?;
+        let s1: Setting = Setting::from_str(json, FileFormat::Json)?;
+
+        assert_eq!(def, s1);
+        assert_eq!(def, s2);
+
+        Ok(())
+    }
 
     #[test]
     fn read() -> Result<()> {
@@ -314,7 +375,7 @@ mod tests {
             .rand_bytes(0)
             .tempfile()?;
 
-        let setting = Setting::read(&file)?;
+        let setting = Setting::from_file(&file)?;
         assert_eq!(setting.information.name, "");
         assert!(setting.information.supported_nips.contains(&1));
         fs::write(
@@ -326,7 +387,7 @@ mod tests {
         host = "127.0.0.1"
         "#,
         )?;
-        let setting = Setting::read(&file)?;
+        let setting = Setting::from_file(&file)?;
         assert_eq!(setting.information.name, "nostr".to_string());
         Ok(())
     }

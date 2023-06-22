@@ -15,11 +15,17 @@ actix-server = "2.2.0"
 actix-web = "4.3.1"
 actix-web-actors = "4.2.0"
 bytestring = "1.3.0"
-config = { version = "0.13.3", features = ["toml"], default-features = false }
+config = { version = "0.13.3", features = [
+    "toml",
+    "json",
+], default-features = false }
+duration-str = { version = "0.5.1", default-features = false }
 governor = "0.5.1"
 hex = "0.4.3"
 metrics = "0.21.0"
-metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = ["push-gateway"] }
+metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = [
+    "push-gateway",
+] }
 metrics-util = "0.15.0"
 nostr-db = { path = "../db" }
 notify = "6.0.0"

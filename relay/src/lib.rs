@@ -21,6 +21,7 @@ impl actix_web::ResponseError for Error {}
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
 mod app;
+pub mod duration;
 mod extension;
 pub mod extensions;
 mod hash;

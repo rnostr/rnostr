@@ -1,4 +1,5 @@
 use crate::{
+    duration,
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
     setting::SettingWrapper,
     Extension, ExtensionMessageResult, Session,
@@ -19,12 +20,14 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tracing::error;
 
 #[derive(Deserialize, Debug)]
 pub struct EventQuota {
     #[serde(default)]
     pub description: String,
-    pub period: NonZeroU32,
+    #[serde(with = "duration")]
+    pub period: Duration,
     pub limit: NonZeroU32,
     /// only limit for kinds
     /// support kind list: [1, 2, 3]
@@ -37,7 +40,6 @@ pub struct EventQuota {
 /// a simple range included(start)..excluded(end)
 #[derive(Debug, PartialEq, Eq)]
 pub struct Range(pub u64, pub u64);
-struct RangeVisitor(PhantomData<()>);
 
 impl Range {
     pub fn contains(&self, value: u64) -> bool {
@@ -45,6 +47,7 @@ impl Range {
     }
 }
 
+struct RangeVisitor(PhantomData<()>);
 impl<'de> Visitor<'de> for RangeVisitor {
     type Value = Range;
 
@@ -105,11 +108,10 @@ impl EventQuota {
 
 pub trait Quotable {
     fn limit(&self) -> NonZeroU32;
-    fn period(&self) -> NonZeroU32;
+    fn period(&self) -> Duration;
     fn quota(&self) -> Quota {
         Quota::with_period(Duration::from_nanos(
-            (Duration::from_secs(self.period().get() as u64).as_nanos()
-                / self.limit().get() as u128) as u64,
+            (self.period().as_nanos() / self.limit().get() as u128) as u64,
         ))
         .unwrap()
         .allow_burst(self.limit())
@@ -120,7 +122,7 @@ impl Quotable for EventQuota {
     fn limit(&self) -> NonZeroU32 {
         self.limit
     }
-    fn period(&self) -> NonZeroU32 {
+    fn period(&self) -> Duration {
         self.period
     }
 }
@@ -134,7 +136,7 @@ pub struct RatelimiterSetting {
     pub event: Vec<EventQuota>,
     /// interval at second for clearing invalid data to free up memory.
     /// 0 will be converted to default 60
-    #[serde_as(as = "serde_with::DurationSeconds<i64>")]
+    #[serde(with = "duration")]
     pub clear_interval: Duration,
 }
 
@@ -176,13 +178,19 @@ impl Extension for Ratelimiter {
 
     fn setting(&mut self, setting: &SettingWrapper) {
         self.setting = setting.read().parse_extension(self.name());
+        let mut limiters = Limiters::new();
+        for q in &self.setting.event {
+            if q.period().is_zero() {
+                error!("limiter quota period is not allowed to be 0, reset to default");
+                self.setting = Default::default();
+                return;
+            }
+            limiters.push(GovernorRateLimiter::dashmap(q.quota()))
+        }
+
+        self.event_limiters = limiters;
         if self.setting.clear_interval.is_zero() {
             self.setting.clear_interval = Duration::from_secs(60);
-        }
-        self.event_limiters = Limiters::new();
-        for q in &self.setting.event {
-            self.event_limiters
-                .push(GovernorRateLimiter::dashmap(q.quota()))
         }
     }
 
@@ -286,7 +294,7 @@ mod tests {
 
         let q = EventQuota {
             description: Default::default(),
-            period: NonZeroU32::new(1).unwrap(),
+            period: Duration::from_secs(1),
             limit: NonZeroU32::new(1).unwrap(),
             kinds: None,
             ip_whitelist: None,
@@ -295,7 +303,7 @@ mod tests {
 
         let q = EventQuota {
             description: Default::default(),
-            period: NonZeroU32::new(1).unwrap(),
+            period: Duration::from_secs(1),
             limit: NonZeroU32::new(1).unwrap(),
             kinds: Some(vec![Range(1, 100), Range(200, 300)]),
             ip_whitelist: Some(vec![ip.clone()]),
@@ -312,7 +320,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn check() -> Result<()> {
-        let setting = Setting::default_wrapper();
+        let setting = Setting::default().wrapper();
         {
             let mut w = setting.write();
             w.extra = serde_json::from_str(
