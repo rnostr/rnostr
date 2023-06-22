@@ -25,6 +25,7 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
         app_data
             .add_extension(extensions::Metrics::new())
             .add_extension(extensions::Auth::new())
+            .add_extension(extensions::Ratelimiter::new())
             .web_server()
             .unwrap()
             .await

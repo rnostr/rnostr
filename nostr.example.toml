@@ -102,7 +102,7 @@ enabled = false
 # # rate limiter ruler list when write event per user client IP
 # [[rate_limiter.event]]
 # description = "allow only ten events per minute"
-# period = "60s"
+# period = "1m"
 # limit = 10
 
 # # only limit for kinds

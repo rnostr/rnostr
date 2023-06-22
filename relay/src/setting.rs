@@ -1,4 +1,4 @@
-use crate::{duration, hash::NoOpHasherDefault, Result};
+use crate::{duration::NonZeroDuration, hash::NoOpHasherDefault, Result};
 use config::{Config, File, FileFormat};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -92,13 +92,11 @@ pub struct Network {
     pub port: u16,
     /// heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
     /// How long before lack of client response causes a timeout
-    #[serde(with = "duration")]
-    pub heartbeat_timeout: Duration,
+    pub heartbeat_timeout: NonZeroDuration,
 
     /// heartbeat interval
     /// How often heartbeat pings are sent
-    #[serde(with = "duration")]
-    pub heartbeat_interval: Duration,
+    pub heartbeat_interval: NonZeroDuration,
 
     pub real_ip_header: Option<Vec<String>>,
 
@@ -111,8 +109,8 @@ impl Default for Network {
         Self {
             host: "127.0.0.1".to_string(),
             port: 7707,
-            heartbeat_interval: Duration::from_secs(60),
-            heartbeat_timeout: Duration::from_secs(120),
+            heartbeat_interval: Duration::from_secs(60).try_into().unwrap(),
+            heartbeat_timeout: Duration::from_secs(120).try_into().unwrap(),
             real_ip_header: None,
             index_redirect_to: None,
         }
@@ -276,13 +274,10 @@ impl Setting {
     }
 
     fn correct(&mut self) {
-        if self.network.heartbeat_timeout.is_zero()
-            || self.network.heartbeat_interval.is_zero()
-            || self.network.heartbeat_timeout <= self.network.heartbeat_interval
-        {
-            error!("network heartbeat_timeout must bigger than heartbeat_interval and both must be greater than 0, use defaults");
-            self.network.heartbeat_interval = Duration::from_secs(60);
-            self.network.heartbeat_timeout = Duration::from_secs(120);
+        if self.network.heartbeat_timeout <= self.network.heartbeat_interval {
+            error!("network heartbeat_timeout must bigger than heartbeat_interval, use defaults");
+            self.network.heartbeat_interval = Duration::from_secs(60).try_into().unwrap();
+            self.network.heartbeat_timeout = Duration::from_secs(120).try_into().unwrap();
         }
     }
 

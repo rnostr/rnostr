@@ -10,16 +10,7 @@ use serde::{
     de::{Error, MapAccess, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{fmt, time::Duration};
-
-macro_rules! try1 {
-    ($expr:expr) => {
-        match $expr {
-            Ok(val) => val,
-            Err(err) => return Err(err),
-        }
-    };
-}
+use std::{fmt, ops::Deref, time::Duration};
 
 /// Deserialize a `Duration`
 pub fn deserialize<'a, D>(d: D) -> Result<Duration, D::Error>
@@ -35,6 +26,56 @@ where
     S: Serializer,
 {
     d.serialize(s)
+}
+
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[serde(into = "Duration")]
+pub struct NonZeroDuration(Duration);
+
+impl NonZeroDuration {
+    pub fn new(value: Duration) -> Option<Self> {
+        if value.is_zero() {
+            None
+        } else {
+            Some(Self(value))
+        }
+    }
+}
+
+impl Into<Duration> for NonZeroDuration {
+    fn into(self) -> Duration {
+        self.0
+    }
+}
+
+impl TryFrom<Duration> for NonZeroDuration {
+    type Error = &'static str;
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        if value.is_zero() {
+            Err("duration can't be zero")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+impl Deref for NonZeroDuration {
+    type Target = Duration;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for NonZeroDuration {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer
+            .deserialize_any(DurationVisitor)?
+            .try_into()
+            .map_err(D::Error::custom)
+    }
 }
 
 #[derive(Deserialize)]
@@ -69,19 +110,19 @@ impl<'de> Visitor<'de> for DurationVisitor {
     where
         A: SeqAccess<'de>,
     {
-        let secs: u64 = match try1!(seq.next_element()) {
+        let secs: u64 = match seq.next_element()? {
             Some(value) => value,
             None => {
                 return Err(Error::invalid_length(0, &self));
             }
         };
-        let nanos: u32 = match try1!(seq.next_element()) {
+        let nanos: u32 = match seq.next_element()? {
             Some(value) => value,
             None => {
                 return Err(Error::invalid_length(1, &self));
             }
         };
-        try1!(check_overflow(secs, nanos));
+        check_overflow(secs, nanos)?;
         Ok(Duration::new(secs, nanos))
     }
 
@@ -91,19 +132,19 @@ impl<'de> Visitor<'de> for DurationVisitor {
     {
         let mut secs: Option<u64> = None;
         let mut nanos: Option<u32> = None;
-        while let Some(key) = try1!(map.next_key()) {
+        while let Some(key) = map.next_key()? {
             match key {
                 Field::Secs => {
                     if secs.is_some() {
                         return Err(<A::Error as Error>::duplicate_field("secs"));
                     }
-                    secs = Some(try1!(map.next_value()));
+                    secs = Some(map.next_value()?);
                 }
                 Field::Nanos => {
                     if nanos.is_some() {
                         return Err(<A::Error as Error>::duplicate_field("nanos"));
                     }
-                    nanos = Some(try1!(map.next_value()));
+                    nanos = Some(map.next_value()?);
                 }
             }
         }
@@ -115,7 +156,7 @@ impl<'de> Visitor<'de> for DurationVisitor {
             Some(nanos) => nanos,
             None => return Err(<A::Error as Error>::missing_field("nanos")),
         };
-        try1!(check_overflow(secs, nanos));
+        check_overflow(secs, nanos)?;
         Ok(Duration::new(secs, nanos))
     }
 
@@ -123,7 +164,7 @@ impl<'de> Visitor<'de> for DurationVisitor {
     where
         E: Error,
     {
-        try1!(check_overflow(v, 0));
+        check_overflow(v, 0)?;
         Ok(Duration::from_secs(v))
     }
 
@@ -163,6 +204,37 @@ mod tests {
         let json = serde_json::to_string(&t)?;
         let t = serde_json::from_str::<Test>(&json)?;
         assert_eq!(t.time, Duration::from_secs(60));
+
+        let t = serde_json::from_str::<Test>(r#"{"time": 0}"#)?;
+        assert_eq!(t.time, Duration::from_secs(0));
+        Ok(())
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct TestNonZero {
+        time: NonZeroDuration,
+    }
+    #[test]
+    fn non_zero() -> Result<()> {
+        let t = serde_json::from_str::<TestNonZero>(r#"{"time": 1}"#)?;
+        assert_eq!(t.time, Duration::from_secs(1).try_into().unwrap());
+
+        let t = serde_json::from_str::<TestNonZero>(r#"{"time": "1m"}"#)?;
+        assert_eq!(t.time, Duration::from_secs(60).try_into().unwrap());
+
+        let t = serde_json::from_str::<TestNonZero>(r#"{"time": [1, 1]}"#)?;
+        assert_eq!(t.time, Duration::new(1, 1).try_into().unwrap());
+
+        let t = serde_json::from_str::<TestNonZero>(r#"{"time": {"secs": 1, "nanos": 1}}"#)?;
+        assert_eq!(t.time, Duration::new(1, 1).try_into().unwrap());
+
+        let t = serde_json::from_str::<TestNonZero>(r#"{"time": "1m"}"#)?;
+        let json = serde_json::to_string(&t)?;
+        let t = serde_json::from_str::<TestNonZero>(&json)?;
+        assert_eq!(t.time, Duration::from_secs(60).try_into().unwrap());
+
+        let t = serde_json::from_str::<TestNonZero>(r#"{"time": 0}"#);
+        assert!(t.is_err());
         Ok(())
     }
 }

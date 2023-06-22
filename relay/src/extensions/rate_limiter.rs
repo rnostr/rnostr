@@ -1,5 +1,5 @@
 use crate::{
-    duration,
+    duration::NonZeroDuration,
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
     setting::SettingWrapper,
     Extension, ExtensionMessageResult, Session,
@@ -17,17 +17,16 @@ use std::{
     fmt,
     marker::PhantomData,
     num::NonZeroU32,
+    ops::Deref,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::error;
 
 #[derive(Deserialize, Debug)]
 pub struct EventQuota {
     #[serde(default)]
     pub description: String,
-    #[serde(with = "duration")]
-    pub period: Duration,
+    pub period: NonZeroDuration,
     pub limit: NonZeroU32,
     /// only limit for kinds
     /// support kind list: [1, 2, 3]
@@ -108,7 +107,7 @@ impl EventQuota {
 
 pub trait Quotable {
     fn limit(&self) -> NonZeroU32;
-    fn period(&self) -> Duration;
+    fn period(&self) -> NonZeroDuration;
     fn quota(&self) -> Quota {
         Quota::with_period(Duration::from_nanos(
             (self.period().as_nanos() / self.limit().get() as u128) as u64,
@@ -122,22 +121,30 @@ impl Quotable for EventQuota {
     fn limit(&self) -> NonZeroU32 {
         self.limit
     }
-    fn period(&self) -> Duration {
+    fn period(&self) -> NonZeroDuration {
         self.period
     }
 }
 
-#[derive(Deserialize, Default, Debug)]
-#[serde_with::serde_as]
+#[derive(Deserialize, Debug)]
 #[serde(default)]
 pub struct RatelimiterSetting {
     pub enabled: bool,
     /// write event rate limiter: ["EVENT"]
     pub event: Vec<EventQuota>,
     /// interval at second for clearing invalid data to free up memory.
-    /// 0 will be converted to default 60
-    #[serde(with = "duration")]
-    pub clear_interval: Duration,
+    /// default 60 non zero
+    pub clear_interval: NonZeroDuration,
+}
+
+impl Default for RatelimiterSetting {
+    fn default() -> Self {
+        Self {
+            enabled: Default::default(),
+            event: Default::default(),
+            clear_interval: Duration::from_secs(60).try_into().unwrap(),
+        }
+    }
 }
 
 type Limiters = Vec<GovernorRateLimiter<String, DashMapStateStore<String>, DefaultClock>>;
@@ -159,7 +166,7 @@ impl Ratelimiter {
     }
 
     pub fn clear(&self) {
-        if self.clear_time.read().elapsed() > self.setting.clear_interval {
+        if &self.clear_time.read().elapsed() > self.setting.clear_interval.deref() {
             {
                 let mut w = self.clear_time.write();
                 *w = Instant::now();
@@ -178,20 +185,12 @@ impl Extension for Ratelimiter {
 
     fn setting(&mut self, setting: &SettingWrapper) {
         self.setting = setting.read().parse_extension(self.name());
-        let mut limiters = Limiters::new();
-        for q in &self.setting.event {
-            if q.period().is_zero() {
-                error!("limiter quota period is not allowed to be 0, reset to default");
-                self.setting = Default::default();
-                return;
-            }
-            limiters.push(GovernorRateLimiter::dashmap(q.quota()))
-        }
-
-        self.event_limiters = limiters;
-        if self.setting.clear_interval.is_zero() {
-            self.setting.clear_interval = Duration::from_secs(60);
-        }
+        self.event_limiters = self
+            .setting
+            .event
+            .iter()
+            .map(|q| GovernorRateLimiter::dashmap(q.quota()))
+            .collect::<Vec<_>>();
     }
 
     fn message(
@@ -294,7 +293,7 @@ mod tests {
 
         let q = EventQuota {
             description: Default::default(),
-            period: Duration::from_secs(1),
+            period: Duration::from_secs(1).try_into().unwrap(),
             limit: NonZeroU32::new(1).unwrap(),
             kinds: None,
             ip_whitelist: None,
@@ -303,7 +302,7 @@ mod tests {
 
         let q = EventQuota {
             description: Default::default(),
-            period: Duration::from_secs(1),
+            period: Duration::from_secs(1).try_into().unwrap(),
             limit: NonZeroU32::new(1).unwrap(),
             kinds: Some(vec![Range(1, 100), Range(200, 300)]),
             ip_whitelist: Some(vec![ip.clone()]),
