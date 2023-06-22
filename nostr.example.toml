@@ -73,23 +73,25 @@ auth = "auth_key"
 [auth]
 enabled = false
 
-# [auth.read]
-# # only the list IP are allowed to read
+# # Authenticate the command 'REQ' 
+# [auth.req]
+# # only the list IP are allowed to req
 # ip_whitelist = ["127.0.0.1"]
-# # only the list IP are denied to read
+# # only the list IP are denied to req
 # ip_blacklist = ["127.0.0.1"]
 # # need auth when list provide
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
 
-# [auth.write]
+# # Authenticate the command 'EVENT' 
+# [auth.event]
 # ip_whitelist = ["127.0.0.1"]
 # ip_blacklist = ["127.0.0.1"]
 # # need auth when list provide
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
 
-# Rate limiter extension
+# IP Rate limiter extension
 [rate_limiter]
 enabled = false
 
@@ -97,9 +99,9 @@ enabled = false
 # # 0 will be converted to default 60
 # clear_interval = 60
 
-# # rate limiter ruler list when write event
+# # rate limiter ruler list when write event per user client IP
 # [[rate_limiter.event]]
-# description = "allow only ten write events per minute"
+# description = "allow only ten events per minute"
 # period = 60
 # limit = 10
 
@@ -111,3 +113,9 @@ enabled = false
 
 # # skip when ip in whitelist
 # ip_whitelist = ["127.0.0.1"]
+
+# [[rate_limiter.event]]
+# description = "allow only five write events per minute when event kind between 0 to 10000"
+# period = 60
+# limit = 5
+# kinds = [[0, 10000]]

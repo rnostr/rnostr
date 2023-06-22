@@ -21,9 +21,9 @@ pub struct Permission {
 pub struct AuthSetting {
     pub enabled: bool,
     /// read auth: ["REQ"]
-    pub read: Option<Permission>,
+    pub req: Option<Permission>,
     /// write auth: ["EVENT"]
-    pub write: Option<Permission>,
+    pub event: Option<Permission>,
 }
 
 #[derive(Default, Debug)]
@@ -154,9 +154,8 @@ impl Extension for Auth {
                     return OutgoingMessage::notice("auth error").into();
                 }
                 IncomingMessage::Event(event) => {
-                    // write
                     if let Err(err) = Self::verify_permission(
-                        self.setting.write.as_ref(),
+                        self.setting.event.as_ref(),
                         state.map(|s| s.pubkey()).flatten(),
                         session.ip(),
                     ) {
@@ -165,9 +164,8 @@ impl Extension for Auth {
                     }
                 }
                 IncomingMessage::Req(_) => {
-                    // read
                     if let Err(err) = Self::verify_permission(
-                        self.setting.read.as_ref(),
+                        self.setting.req.as_ref(),
                         state.map(|s| s.pubkey()).flatten(),
                         session.ip(),
                     ) {
@@ -375,7 +373,7 @@ mod tests {
                 r#"{{
                 "auth": {{
                     "enabled": true,
-                    "write": {{
+                    "event": {{
                         "pubkey_whitelist": ["{}"]
                     }}
                 }}
