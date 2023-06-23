@@ -290,7 +290,7 @@ mod tests {
             {
                 let mut w = messages.write();
                 assert_eq!(w.len(), 2);
-                assert!(w.get(0).unwrap().0.contains("Ok"));
+                assert!(w.get(0).unwrap().0.contains("OK"));
                 assert!(w.get(1).unwrap().0.contains("EVENT"));
                 w.clear();
             }

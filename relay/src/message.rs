@@ -258,7 +258,7 @@ impl OutgoingMessage {
     }
 
     pub fn ok(event_id: &str, saved: bool, message: &str) -> Self {
-        Self(json!(["Ok", event_id, saved, message]).to_string())
+        Self(json!(["OK", event_id, saved, message]).to_string())
     }
 }
 
