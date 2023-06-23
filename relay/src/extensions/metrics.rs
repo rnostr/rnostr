@@ -1,6 +1,6 @@
 use crate::{setting::SettingWrapper, App, Extension};
 use actix_web::{web, HttpResponse};
-use metrics::describe_counter;
+use metrics::{describe_counter, describe_gauge, describe_histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::Deserialize;
 
@@ -42,7 +42,11 @@ impl Extension for Metrics {
 
 pub fn describe_metrics() {
     describe_counter!("new_connections", "The total count of new connections");
-    describe_counter!("current_connections", "The number of current connections");
+    describe_gauge!("current_connections", "The number of current connections");
+    describe_counter!("event", "The total count of event");
+    describe_counter!("req", "The total count of req");
+    describe_histogram!("db_get", "The time of per filter get");
+    describe_histogram!("db_write", "The time of per write transaction");
 }
 
 pub fn create_prometheus_handle() -> PrometheusHandle {

@@ -1,7 +1,11 @@
 use crate::{message::*, Result};
 use actix::prelude::*;
+use metrics::histogram;
 use nostr_db::{now, Db, Event};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{debug, error, info};
 
 /// Single-threaded write events, delete expired events
@@ -32,6 +36,7 @@ impl Writer {
     pub fn write(&mut self) -> Result<()> {
         if self.events.len() > 0 {
             debug!("write events: {:?}", self.events);
+            let start = Instant::now();
             let mut writer = self.db.writer()?;
             while let Some(event) = self.events.pop() {
                 match self.db.put(&mut writer, &event.event) {
@@ -52,6 +57,7 @@ impl Writer {
                 }
             }
             self.db.commit(writer)?;
+            histogram!("db_write", start.elapsed());
         }
         Ok(())
     }

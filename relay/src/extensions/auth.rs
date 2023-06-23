@@ -3,6 +3,7 @@ use crate::{
     setting::SettingWrapper,
     Error, Extension, ExtensionMessageResult, Session,
 };
+use metrics::{describe_counter, increment_counter};
 use nostr_db::now;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -53,6 +54,7 @@ impl AuthState {
 
 impl Auth {
     pub fn new() -> Self {
+        describe_counter!("auth", "The total count of auth message");
         Self {
             setting: AuthSetting::default(),
         }
@@ -139,6 +141,7 @@ impl Extension for Auth {
             let state = session.get::<AuthState>();
             match &msg.msg {
                 IncomingMessage::Auth(event) => {
+                    increment_counter!("auth");
                     if let Some(AuthState::Challenge(challenge)) = state {
                         if let Err(err) = event.validate(now(), 0, 0) {
                             return OutgoingMessage::notice(&err.to_string()).into();

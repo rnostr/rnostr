@@ -1,7 +1,8 @@
 use crate::{message::*, Result};
 use actix::prelude::*;
+use metrics::histogram;
 use nostr_db::Db;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 /// Requst by filter
 /// Concurrent read events from db
@@ -18,6 +19,7 @@ impl Reader {
     pub fn read(&self, msg: &ReadEvent) -> Result<()> {
         let reader = self.db.reader()?;
         for filter in &msg.subscription.filters {
+            let start = Instant::now();
             let iter = self.db.iter::<String, _>(&reader, filter)?;
             for event in iter {
                 let event = event?;
@@ -27,6 +29,7 @@ impl Reader {
                     msg: OutgoingMessage::event(&msg.subscription.id, &event),
                 });
             }
+            histogram!("db_get", start.elapsed());
         }
         self.addr.do_send(ReadEventResult {
             id: msg.id,

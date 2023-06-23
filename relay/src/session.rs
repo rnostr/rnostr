@@ -177,6 +177,15 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 let msg = serde_json::from_str::<IncomingMessage>(&text);
                 match msg {
                     Ok(msg) => {
+                        match &msg {
+                            IncomingMessage::Event(_) => {
+                                increment_counter!("event");
+                            }
+                            IncomingMessage::Req(_) => {
+                                increment_counter!("req");
+                            }
+                            _ => {}
+                        }
                         let mut msg = ClientMessage {
                             id: self.id,
                             text,
