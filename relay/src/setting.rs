@@ -302,6 +302,7 @@ impl Setting {
                         match Self::from_file(&c_file) {
                             Ok(new_setting) => {
                                 info!("Reload config success {:?}", c_file);
+                                info!("{:?}", &new_setting);
                                 {
                                   let mut w = c_setting.write();
                                   *w = new_setting;

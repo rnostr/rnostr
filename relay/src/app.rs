@@ -110,6 +110,9 @@ impl App {
                 (Setting::default().wrapper(), None)
             }
         };
+        {
+            info!("{:?}", setting.read());
+        }
 
         let r = setting.read();
         let path = db_path
