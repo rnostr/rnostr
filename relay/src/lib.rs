@@ -3,6 +3,8 @@ pub enum Error {
     #[error(transparent)]
     Db(#[from] nostr_db::Error),
     #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
     Config(#[from] config::ConfigError),
     #[error(transparent)]
     Notify(#[from] notify::Error),

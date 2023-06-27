@@ -1,16 +1,18 @@
+use crate::Error;
 use crate::{duration::NonZeroDuration, hash::NoOpHasherDefault, Result};
 use config::{Config, File, FileFormat};
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    env::current_dir,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 use tracing::{error, info};
 
@@ -288,40 +290,52 @@ impl Setting {
     ) -> Result<(SettingWrapper, RecommendedWatcher)> {
         let setting = Self::from_file(&file)?;
         let setting = Arc::new(RwLock::new(setting));
-        let c_file = file.as_ref().to_path_buf();
         let c_setting = Arc::clone(&setting);
 
-        let mut watcher =
-        // To make sure that the config lives as long as the function
-        // we need to move the ownership of the config inside the function
-        // To learn more about move please read [Using move Closures with Threads](https://doc.rust-lang.org/book/ch16-01-threads.html?highlight=move#using-move-closures-with-threads)
-        RecommendedWatcher::new(move |result: Result<Event, notify::Error>| {
-            match result {
+        let file = current_dir()?.join(file.as_ref());
+        let c_file = file.clone();
+
+        // support vim editor. watch dir
+        // https://docs.rs/notify/latest/notify/#editor-behaviour
+        // https://github.com/notify-rs/notify/issues/113#issuecomment-281836995
+
+        let dir = file
+            .parent()
+            .ok_or(Error::Message("failed to get config dir".to_owned()))?;
+
+        let mut watcher = RecommendedWatcher::new(
+            move |result: Result<Event, notify::Error>| match result {
                 Ok(event) => {
-                    if event.kind.is_modify() {
+                    if matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)))
+                        && event.paths.contains(&c_file)
+                    {
                         match Self::from_file(&c_file) {
                             Ok(new_setting) => {
                                 info!("Reload config success {:?}", c_file);
                                 info!("{:?}", &new_setting);
                                 {
-                                  let mut w = c_setting.write();
-                                  *w = new_setting;
+                                    let mut w = c_setting.write();
+                                    *w = new_setting;
                                 }
                                 f(&c_setting);
                             }
                             Err(e) => {
-                                error!(error = e.to_string(), "failed to reload config {:?}", c_file);
+                                error!(
+                                    error = e.to_string(),
+                                    "failed to reload config {:?}", c_file
+                                );
                             }
                         }
                     }
-                },
+                }
                 Err(e) => {
                     error!(error = e.to_string(), "failed to watch file {:?}", c_file);
-                },
-            }
-        }, notify::Config::default())?;
+                }
+            },
+            notify::Config::default(),
+        )?;
 
-        watcher.watch(file.as_ref(), RecursiveMode::NonRecursive)?;
+        watcher.watch(dir, RecursiveMode::NonRecursive)?;
 
         Ok((setting, watcher))
     }
