@@ -8,11 +8,15 @@
 
 ARG SRC_DIR=/usr/local/src/nostr
 ARG BUILDER_DIR=/srv/nostr
+
+# build base
 ARG BASE=base
 
 # Base image
 FROM rust:1.70.0-slim-bullseye as base
-FROM base as mirror
+
+# mirror image for china
+FROM base as mirror_cn
 
 # Replace cn mirrors
 ENV RUSTUP_DIST_SERVER=https://rsproxy.cn
