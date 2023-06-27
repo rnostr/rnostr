@@ -9,7 +9,8 @@ use serde_json::{json, Value};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    env::current_dir,
+    fs,
+    ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -187,7 +188,95 @@ impl PartialEq for Setting {
     }
 }
 
-pub type SettingWrapper = Arc<RwLock<Setting>>;
+#[derive(Debug, Clone)]
+pub struct SettingWrapper {
+    inner: Arc<RwLock<Setting>>,
+    watcher: Option<Arc<RecommendedWatcher>>,
+}
+
+impl Deref for SettingWrapper {
+    type Target = Arc<RwLock<Setting>>;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl From<Setting> for SettingWrapper {
+    fn from(setting: Setting) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(setting)),
+            watcher: None,
+        }
+    }
+}
+
+impl SettingWrapper {
+    /// reload setting from file
+    pub fn reload<P: AsRef<Path>>(&self, file: P) -> Result<()> {
+        let setting = Setting::from_file(&file)?;
+        {
+            let mut w = self.write();
+            *w = setting;
+        }
+        Ok(())
+    }
+
+    /// config from file and watch file update then reload
+    pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
+        file: P,
+        f: F,
+    ) -> Result<Self> {
+        let mut setting: SettingWrapper = Setting::from_file(&file)?.into();
+        let c_setting = setting.clone();
+
+        // let file = current_dir()?.join(file.as_ref());
+        // symbolic links
+        let file = fs::canonicalize(file.as_ref())?;
+        let c_file = file.clone();
+
+        // support vim editor. watch dir
+        // https://docs.rs/notify/latest/notify/#editor-behaviour
+        // https://github.com/notify-rs/notify/issues/113#issuecomment-281836995
+
+        let dir = file
+            .parent()
+            .ok_or(Error::Message("failed to get config dir".to_owned()))?;
+
+        let mut watcher = RecommendedWatcher::new(
+            move |result: Result<Event, notify::Error>| match result {
+                Ok(event) => {
+                    if matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)))
+                        && event.paths.contains(&c_file)
+                    {
+                        match c_setting.reload(&c_file) {
+                            Ok(_) => {
+                                info!("Reload config success {:?}", c_file);
+                                info!("{:?}", c_setting.read());
+                                f(&c_setting);
+                            }
+                            Err(e) => {
+                                error!(
+                                    error = e.to_string(),
+                                    "failed to reload config {:?}", c_file
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(error = e.to_string(), "failed to watch file {:?}", c_file);
+                }
+            },
+            notify::Config::default(),
+        )?;
+
+        watcher.watch(dir, RecursiveMode::NonRecursive)?;
+        // save watcher
+        setting.watcher = Some(Arc::new(watcher));
+
+        Ok(setting)
+    }
+}
 
 impl Setting {
     /// add supported nips
@@ -230,10 +319,6 @@ impl Setting {
         self.extensions
             .get(&TypeId::of::<T>())
             .and_then(|boxed| boxed.downcast_ref())
-    }
-
-    pub fn wrapper(self) -> SettingWrapper {
-        Arc::new(RwLock::new(self))
     }
 
     /// information json
@@ -281,63 +366,6 @@ impl Setting {
             self.network.heartbeat_interval = Duration::from_secs(60).try_into().unwrap();
             self.network.heartbeat_timeout = Duration::from_secs(120).try_into().unwrap();
         }
-    }
-
-    /// config from file and watch file update then reload
-    pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
-        file: P,
-        f: F,
-    ) -> Result<(SettingWrapper, RecommendedWatcher)> {
-        let setting = Self::from_file(&file)?;
-        let setting = Arc::new(RwLock::new(setting));
-        let c_setting = Arc::clone(&setting);
-
-        let file = current_dir()?.join(file.as_ref());
-        let c_file = file.clone();
-
-        // support vim editor. watch dir
-        // https://docs.rs/notify/latest/notify/#editor-behaviour
-        // https://github.com/notify-rs/notify/issues/113#issuecomment-281836995
-
-        let dir = file
-            .parent()
-            .ok_or(Error::Message("failed to get config dir".to_owned()))?;
-
-        let mut watcher = RecommendedWatcher::new(
-            move |result: Result<Event, notify::Error>| match result {
-                Ok(event) => {
-                    if matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)))
-                        && event.paths.contains(&c_file)
-                    {
-                        match Self::from_file(&c_file) {
-                            Ok(new_setting) => {
-                                info!("Reload config success {:?}", c_file);
-                                info!("{:?}", &new_setting);
-                                {
-                                    let mut w = c_setting.write();
-                                    *w = new_setting;
-                                }
-                                f(&c_setting);
-                            }
-                            Err(e) => {
-                                error!(
-                                    error = e.to_string(),
-                                    "failed to reload config {:?}", c_file
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!(error = e.to_string(), "failed to watch file {:?}", c_file);
-                }
-            },
-            notify::Config::default(),
-        )?;
-
-        watcher.watch(dir, RecursiveMode::NonRecursive)?;
-
-        Ok((setting, watcher))
     }
 }
 
@@ -409,7 +437,7 @@ mod tests {
             .suffix(".toml")
             .tempfile()?;
 
-        let (setting, _watcher) = Setting::watch(&file, |_s| {})?;
+        let setting = SettingWrapper::watch(&file, |_s| {})?;
         {
             let r = setting.read();
             assert_eq!(r.information.name, "");
@@ -422,7 +450,7 @@ mod tests {
     name = "nostr"
     "#,
         )?;
-        sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(300));
         // println!("read {:?} {:?}", setting.read(), file);
         {
             let r = setting.read();

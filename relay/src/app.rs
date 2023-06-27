@@ -7,7 +7,6 @@ use actix_web::{
     web, App as WebApp, HttpServer,
 };
 use nostr_db::Db;
-use notify::RecommendedWatcher;
 use parking_lot::RwLock;
 use std::{path::Path, sync::Arc};
 use tracing::info;
@@ -81,7 +80,6 @@ pub struct App {
     pub db: Arc<Db>,
     pub setting: SettingWrapper,
     pub extensions: Arc<RwLock<Extensions>>,
-    pub watcher: Option<RecommendedWatcher>,
 }
 
 impl App {
@@ -93,21 +91,20 @@ impl App {
     ) -> Result<Self> {
         let extensions = Arc::new(RwLock::new(Extensions::default()));
         let c_extensions = Arc::clone(&extensions);
-        let (setting, watcher) = if watch && setting_path.is_some() {
+        let setting = if watch && setting_path.is_some() {
             let path = setting_path.as_ref().unwrap().as_ref();
             info!("Watch config {:?}", path);
-            let r = Setting::watch(path, move |s| {
+            SettingWrapper::watch(path, move |s| {
                 let mut w = c_extensions.write();
                 w.call_setting(s);
-            })?;
-            (r.0, Some(r.1))
+            })?
         } else {
             if let Some(path) = setting_path {
                 info!("Load config {:?}", path.as_ref());
-                (Setting::from_file(path.as_ref())?.wrapper(), None)
+                Setting::from_file(path.as_ref())?.into()
             } else {
                 info!("Load default config");
-                (Setting::default().wrapper(), None)
+                Setting::default().into()
             }
         };
         {
@@ -122,14 +119,13 @@ impl App {
         drop(r);
         let db = Arc::new(Db::open(path)?);
 
-        let server = Server::create_with(db.clone(), Arc::clone(&setting));
+        let server = Server::create_with(db.clone(), setting.clone());
 
         Ok(Self {
             server,
             setting,
             db,
             extensions,
-            watcher,
         })
     }
 

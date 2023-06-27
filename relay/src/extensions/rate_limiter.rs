@@ -319,7 +319,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn check() -> Result<()> {
-        let setting = Setting::default().wrapper();
+        let setting: SettingWrapper = Setting::default().into();
         {
             let mut w = setting.write();
             w.extra = serde_json::from_str(

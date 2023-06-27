@@ -26,8 +26,7 @@ impl Server {
 
         Server::create(|ctx| {
             let writer = Writer::new(Arc::clone(&db), ctx.address().recipient()).start();
-            let subscriber =
-                Subscriber::new(ctx.address().recipient(), Arc::clone(&setting)).start();
+            let subscriber = Subscriber::new(ctx.address().recipient(), setting.clone()).start();
             let addr = ctx.address().recipient();
             info!("starting {} reader workers", num);
             let reader =
@@ -247,7 +246,7 @@ mod tests {
         let receiver = receiver.start();
         let addr = receiver.recipient();
 
-        let server = Server::create_with(db, Setting::default().wrapper());
+        let server = Server::create_with(db, Setting::default().into());
 
         let id = server.send(Connect { addr }).await?;
         assert_eq!(id, 1);
