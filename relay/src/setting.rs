@@ -101,7 +101,7 @@ pub struct Network {
     /// How often heartbeat pings are sent
     pub heartbeat_interval: NonZeroDuration,
 
-    pub real_ip_header: Option<Vec<String>>,
+    pub real_ip_header: Option<String>,
 
     /// redirect to other site when user access the http index page
     pub index_redirect_to: Option<String>,

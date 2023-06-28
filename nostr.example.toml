@@ -20,7 +20,7 @@ port = 7707
 
 # real ip header (default empty)
 # ie: cf-connecting-ip, x-real-ip, x-forwarded-for
-# real_ip_header = ["x-forwarded-for"]
+# real_ip_header = "x-forwarded-for"
 
 # redirect to other site when user access the http index page
 # index_redirect_to = "https://example.com"
