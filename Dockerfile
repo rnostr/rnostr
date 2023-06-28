@@ -66,26 +66,32 @@ ARG SRC_DIR
 ARG BUILDER_DIR
 
 ARG BIN_DIR=/usr/local/bin
-ARG DATA_DIR=/nostr
+ARG HOME_DIR=/nostr
+ARG DATA_DIR=${HOME_DIR}/data
+# use dir for watch config file change
+ARG CONF_DIR=${HOME_DIR}/conf
 ARG USER=nostr
 
-RUN adduser --home "${DATA_DIR}" --shell /bin/bash --disabled-login \
+RUN adduser --home "${HOME_DIR}" --shell /bin/bash --disabled-login \
         --gecos "${USER} user" ${USER}
+RUN mkdir ${DATA_DIR} ${CONF_DIR}
+RUN chown ${USER}:${USER} ${DATA_DIR} ${CONF_DIR}
 
 COPY --from=builder --chown=${USER}:${USER} \
      "${BUILDER_DIR}/release/nostr-cli" "${BIN_DIR}"
 COPY --from=builder --chown=${USER}:${USER} \
-     "${SRC_DIR}/nostr.example.toml" "${DATA_DIR}/nostr.toml"
+     "${SRC_DIR}/nostr.example.toml" "${CONF_DIR}/nostr.toml"
 
 
-WORKDIR "${DATA_DIR}"
+WORKDIR "${HOME_DIR}"
 
 USER ${USER}
 
 VOLUME "$DATA_DIR"
+VOLUME "$CONF_DIR"
 
 EXPOSE 7707
 
 ENTRYPOINT ["nostr-cli"]
 
-CMD ["relay", "--watch", "-c", "./nostr.toml"]
+CMD ["relay", "--watch", "-c", "./conf/nostr.toml"]
