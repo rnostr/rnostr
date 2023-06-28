@@ -241,10 +241,12 @@ impl SettingWrapper {
         let dir = file
             .parent()
             .ok_or(Error::Message("failed to get config dir".to_owned()))?;
+        println!("{:?} {:?}", file, dir);
 
         let mut watcher = RecommendedWatcher::new(
             move |result: Result<Event, notify::Error>| match result {
                 Ok(event) => {
+                    // println!("event: {:?}", event);
                     if matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)))
                         && event.paths.contains(&c_file)
                     {
