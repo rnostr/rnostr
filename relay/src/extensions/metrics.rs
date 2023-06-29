@@ -16,9 +16,10 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn new() -> Self {
+        let handle = create_prometheus_handle();
         describe_metrics();
         Self {
-            handle: web::Data::new(create_prometheus_handle()),
+            handle: web::Data::new(handle),
         }
     }
 }
