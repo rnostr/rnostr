@@ -30,7 +30,7 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
             .unwrap()
             .await
             .unwrap();
-        info!("Relay server stopped");
+        info!("Relay server shutdown");
     });
 
     Ok(())
