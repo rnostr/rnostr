@@ -69,7 +69,7 @@ ARG BIN_DIR=/usr/local/bin
 ARG HOME_DIR=/nostr
 ARG DATA_DIR=${HOME_DIR}/data
 # use dir for watch config file change
-ARG CONF_DIR=${HOME_DIR}/conf
+ARG CONF_DIR=${HOME_DIR}/config
 ARG USER=nostr
 
 RUN adduser --home "${HOME_DIR}" --shell /bin/bash --disabled-login \
@@ -94,4 +94,4 @@ EXPOSE 7707
 
 ENTRYPOINT ["nostr-cli"]
 
-CMD ["relay", "--watch", "-c", "./conf/nostr.toml"]
+CMD ["relay", "--watch", "-c", "./config/nostr.toml"]
