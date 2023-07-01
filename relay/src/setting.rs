@@ -175,6 +175,14 @@ pub struct Setting {
     /// extensions setting object
     #[serde(skip)]
     extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>, NoOpHasherDefault>,
+
+    /// nip-11 extension information
+    #[serde(skip)]
+    ext_information: HashMap<String, Value>,
+
+    /// nip-11 extension limitation
+    #[serde(skip)]
+    ext_limitation: HashMap<String, Value>,
 }
 
 impl PartialEq for Setting {
@@ -280,12 +288,22 @@ impl SettingWrapper {
 }
 
 impl Setting {
-    /// add supported nips
+    /// add supported nips for nip-11 information
     pub fn add_nip(&mut self, nip: u32) {
-        if self.information.supported_nips.contains(&nip) {
+        if !self.information.supported_nips.contains(&nip) {
             self.information.supported_nips.push(nip);
             self.information.supported_nips.sort();
         }
+    }
+
+    /// add nip-11 extension information
+    pub fn add_information(&mut self, key: String, value: Value) {
+        self.ext_information.insert(key, value);
+    }
+
+    /// add nip-11 extension limitation
+    pub fn add_limitation(&mut self, key: String, value: Value) {
+        self.ext_limitation.insert(key, value);
     }
 
     /// get extension setting as json from extra
@@ -322,10 +340,10 @@ impl Setting {
             .and_then(|boxed| boxed.downcast_ref())
     }
 
-    /// information json
+    /// nip-11 information json
     pub fn render_information(&self) -> Result<String> {
         let info = &self.information;
-        Ok(serde_json::to_string_pretty(&json!({
+        let mut val = json!({
             "name": info.name,
             "description": info.description,
             "pubkey": info.pubkey,
@@ -334,7 +352,14 @@ impl Setting {
             "version": info.version,
             "supported_nips": info.supported_nips,
             "limitation": &self.limitation,
-        }))?)
+        });
+        self.ext_limitation.iter().for_each(|(k, v)| {
+            val["limitation"][k] = v.clone();
+        });
+        self.ext_information.iter().for_each(|(k, v)| {
+            val[k] = v.clone();
+        });
+        Ok(serde_json::to_string_pretty(&val)?)
     }
 
     /// config from file
@@ -399,6 +424,24 @@ mod tests {
         assert_eq!(def, s1);
         assert_eq!(def, s2);
 
+        Ok(())
+    }
+
+    #[test]
+    fn render() -> Result<()> {
+        let mut def = Setting::default();
+        def.add_nip(1234567);
+        def.add_limitation("payment_required".to_owned(), json!(true));
+        def.add_information("payments_url".to_owned(), json!("https://payments"));
+        let info = def.render_information()?;
+        let val: Value = serde_json::from_str(&info)?;
+        // println!("{:?}", info);
+        assert!(val["supported_nips"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::Number(serde_json::Number::from(1234567))));
+        assert_eq!(val["payments_url"], json!("https://payments"));
+        assert_eq!(val["limitation"]["payment_required"], json!(true));
         Ok(())
     }
 
