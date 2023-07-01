@@ -16,7 +16,7 @@ path = "./data"
 # Interface to listen on. Use 0.0.0.0 to listen on all interfaces (restart required)
 host = "127.0.0.1"
 # Listen port (restart required)
-port = 7707
+port = 8080
 
 # real ip header (default empty)
 # ie: cf-connecting-ip, x-real-ip, x-forwarded-for

@@ -111,7 +111,7 @@ impl Default for Network {
     fn default() -> Self {
         Self {
             host: "127.0.0.1".to_string(),
-            port: 7707,
+            port: 8080,
             heartbeat_interval: Duration::from_secs(60).try_into().unwrap(),
             heartbeat_timeout: Duration::from_secs(120).try_into().unwrap(),
             real_ip_header: None,
