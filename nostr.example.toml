@@ -101,6 +101,9 @@ enabled = false
 
 # # rate limiter ruler list when write event per user client IP
 # [[rate_limiter.event]]
+# # name of rate limiter, used by metrics
+# name = "all"
+# # description will notice the user when rate limiter exceeded
 # description = "allow only ten events per minute"
 # period = "1m"
 # limit = 10
@@ -115,6 +118,7 @@ enabled = false
 # ip_whitelist = ["127.0.0.1"]
 
 # [[rate_limiter.event]]
+# name = "kind 10000"
 # description = "allow only five write events per minute when event kind between 0 to 10000"
 # period = "60s"
 # limit = 5

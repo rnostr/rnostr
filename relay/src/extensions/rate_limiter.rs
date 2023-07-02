@@ -7,6 +7,7 @@ use crate::{
 use governor::{
     clock::DefaultClock, state::keyed::DashMapStateStore, Quota, RateLimiter as GovernorRateLimiter,
 };
+use metrics::{describe_counter, increment_counter};
 use nostr_db::Event;
 use parking_lot::RwLock;
 use serde::{
@@ -24,6 +25,10 @@ use std::{
 
 #[derive(Deserialize, Debug)]
 pub struct EventQuota {
+    /// used by metrics
+    #[serde(default)]
+    pub name: String,
+    /// description will notice the user when rate limiter exceeded
     #[serde(default)]
     pub description: String,
     pub period: NonZeroDuration,
@@ -158,6 +163,10 @@ pub struct Ratelimiter {
 
 impl Ratelimiter {
     pub fn new() -> Self {
+        describe_counter!(
+            "nostr_relay_rate_limiter_exceeded",
+            "The total count of rate limiter exceeded messages"
+        );
         Self {
             setting: Default::default(),
             event_limiters: Default::default(),
@@ -210,6 +219,7 @@ impl Extension for Ratelimiter {
                         let q = &self.setting.event[index];
                         if q.hit(event, ip) {
                             if let Err(_) = limiter.check_key(ip) {
+                                increment_counter!("nostr_relay_rate_limiter_exceeded", "command" => "EVENT", "name" => q.name.clone());
                                 return OutgoingMessage::ok(
                                     &event.id_str(),
                                     false,
@@ -292,6 +302,7 @@ mod tests {
         let ip = "127.0.0.1".to_owned();
 
         let q = EventQuota {
+            name: "test".to_owned(),
             description: Default::default(),
             period: Duration::from_secs(1).try_into().unwrap(),
             limit: NonZeroU32::new(1).unwrap(),
@@ -301,6 +312,7 @@ mod tests {
         assert!(q.hit(&event, &ip));
 
         let q = EventQuota {
+            name: "test".to_owned(),
             description: Default::default(),
             period: Duration::from_secs(1).try_into().unwrap(),
             limit: NonZeroU32::new(1).unwrap(),

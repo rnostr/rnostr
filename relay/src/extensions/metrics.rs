@@ -42,16 +42,19 @@ impl Extension for Metrics {
 }
 
 pub fn describe_metrics() {
+    describe_counter!("nostr_relay_session_total", "The total count of sessions");
     describe_counter!(
-        "nostr_relay_new_connections",
-        "The total count of new connections"
+        "nostr_relay_session_stop_total",
+        "The total session count of stopped by server initiative"
     );
     describe_gauge!(
-        "nostr_relay_current_connections",
-        "The number of current connections"
+        "nostr_relay_session",
+        "The number of current active sessions"
     );
-    describe_counter!("nostr_relay_event", "The total count of event");
-    describe_counter!("nostr_relay_req", "The total count of req");
+    describe_counter!(
+        "nostr_relay_message",
+        "The total count of message from client"
+    );
     describe_histogram!("nostr_relay_db_get", "The time of per filter get");
     describe_histogram!("nostr_relay_db_write", "The time of per write transaction");
 }

@@ -126,6 +126,17 @@ impl IncomingMessage {
             IncomingMessage::Unknown(cmd, _) => cmd,
         }
     }
+
+    pub fn known_command(&self) -> Option<&'static str> {
+        match self {
+            IncomingMessage::Event(_) => Some("EVENT"),
+            IncomingMessage::Close(_) => Some("CLOSE"),
+            IncomingMessage::Req(_) => Some("REQ"),
+            IncomingMessage::Auth(_) => Some("AUTH"),
+            IncomingMessage::Count(_) => Some("COUNT"),
+            IncomingMessage::Unknown(_, _) => None,
+        }
+    }
 }
 
 // https://github.com/serde-rs/serde/issues/1337

@@ -85,6 +85,7 @@ impl Session {
             if Instant::now().duration_since(act.hb) > act.heartbeat_timeout {
                 // heartbeat timed out
                 // stop actor
+                increment_counter!("nostr_relay_session_stop_total", "reason" => "heartbeat timeout");
                 ctx.stop();
                 // don't try to send a ping
                 return;
@@ -109,8 +110,8 @@ impl Actor for Session {
 
     /// Method is called on actor start. We start the heartbeat process here.
     fn started(&mut self, ctx: &mut Self::Context) {
-        increment_counter!("nostr_relay_new_connections");
-        increment_gauge!("nostr_relay_current_connections", 1.0);
+        increment_counter!("nostr_relay_session_total");
+        increment_gauge!("nostr_relay_session", 1.0);
 
         // we'll start heartbeat process on session start.
         self.hb(ctx);
@@ -129,7 +130,10 @@ impl Actor for Session {
                         debug!("Session started {:?} {:?}", act.id, act.ip);
                     }
                     // something is wrong with server
-                    _ => ctx.stop(),
+                    _ => {
+                        increment_counter!("nostr_relay_session_stop_total", "reason" => "server error");
+                        ctx.stop()
+                    },
                 }
                 fut::ready(())
             })
@@ -143,7 +147,7 @@ impl Actor for Session {
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        decrement_gauge!("nostr_relay_current_connections", 1.0);
+        decrement_gauge!("nostr_relay_session", 1.0);
         self.app
             .clone()
             .extensions
@@ -159,6 +163,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
         debug!("Session message {:?} {:?} {:?}", self.id, self.ip, msg);
         let msg = match msg {
             Err(_err) => {
+                increment_counter!("nostr_relay_session_stop_total", "reason" => "message error");
                 ctx.stop();
                 return;
             }
@@ -177,15 +182,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 let msg = serde_json::from_str::<IncomingMessage>(&text);
                 match msg {
                     Ok(msg) => {
-                        match &msg {
-                            IncomingMessage::Event(_) => {
-                                increment_counter!("nostr_relay_event");
-                            }
-                            IncomingMessage::Req(_) => {
-                                increment_counter!("nostr_relay_req");
-                            }
-                            _ => {}
+                        if let Some(cmd) = msg.known_command() {
+                            // only insert known command metrics
+                            increment_counter!("nostr_relay_message", "command" => cmd);
                         }
+
                         let mut msg = ClientMessage {
                             id: self.id,
                             text,
@@ -235,12 +236,14 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
             }
             ws::Message::Close(reason) => {
                 ctx.close(reason);
+                increment_counter!("nostr_relay_session_stop_total", "reason" => "message close");
                 ctx.stop();
             }
             ws::Message::Binary(_) => {
                 ctx.text(OutgoingMessage::notice("Not support binary message"));
             }
             ws::Message::Continuation(_) => {
+                increment_counter!("nostr_relay_session_stop_total", "reason" => "message continuation");
                 ctx.stop();
             }
             ws::Message::Nop => (),

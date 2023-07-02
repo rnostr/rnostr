@@ -1,7 +1,7 @@
 use crate::{
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
     setting::SettingWrapper,
-    Error, Extension, ExtensionMessageResult, Session,
+    Extension, ExtensionMessageResult, Session,
 };
 use metrics::{describe_counter, increment_counter};
 use nostr_db::now;
@@ -54,7 +54,10 @@ impl AuthState {
 
 impl Auth {
     pub fn new() -> Self {
-        describe_counter!("nostr_relay_auth", "The total count of auth message");
+        describe_counter!(
+            "nostr_relay_auth_unauthorized",
+            "The total count of unauthorized messages"
+        );
         Self {
             setting: AuthSetting::default(),
         }
@@ -64,44 +67,34 @@ impl Auth {
         permission: Option<&Permission>,
         pubkey: Option<&String>,
         ip: &String,
-    ) -> Result<(), Error> {
+    ) -> Result<(), &'static str> {
         if let Some(permission) = permission {
             if let Some(list) = &permission.ip_whitelist {
                 if !list.contains(ip) {
-                    return Err(Error::Message(
-                        "restricted: ip not in whitelist".to_string(),
-                    ));
+                    return Err("ip not in whitelist");
                 }
             }
             if let Some(list) = &permission.ip_blacklist {
                 if list.contains(ip) {
-                    return Err(Error::Message("restricted: ip in blacklist".to_string()));
+                    return Err("ip in blacklist");
                 }
             }
             if let Some(list) = &permission.pubkey_whitelist {
                 if let Some(pubkey) = pubkey {
                     if !list.contains(pubkey) {
-                        return Err(Error::Message(
-                            "restricted: pubkey not in whitelist".to_string(),
-                        ));
+                        return Err("pubkey not in whitelist");
                     }
                 } else {
-                    return Err(Error::Message(
-                        "restricted: NIP-42 auth required".to_string(),
-                    ));
+                    return Err("NIP-42 auth required");
                 }
             }
             if let Some(list) = &permission.pubkey_blacklist {
                 if let Some(pubkey) = pubkey {
                     if list.contains(pubkey) {
-                        return Err(Error::Message(
-                            "restricted: pubkey in blacklist".to_string(),
-                        ));
+                        return Err("pubkey in blacklist");
                     }
                 } else {
-                    return Err(Error::Message(
-                        "restricted: NIP-42 auth required".to_string(),
-                    ));
+                    return Err("NIP-42 auth required");
                 }
             }
         }
@@ -141,7 +134,6 @@ impl Extension for Auth {
             let state = session.get::<AuthState>();
             match &msg.msg {
                 IncomingMessage::Auth(event) => {
-                    increment_counter!("nostr_relay_auth");
                     if let Some(AuthState::Challenge(challenge)) = state {
                         if let Err(err) = event.validate(now(), 0, 0) {
                             return OutgoingMessage::notice(&err.to_string()).into();
@@ -162,8 +154,13 @@ impl Extension for Auth {
                         state.map(|s| s.pubkey()).flatten(),
                         session.ip(),
                     ) {
-                        return OutgoingMessage::ok(&event.id_str(), false, &err.to_string())
-                            .into();
+                        increment_counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err);
+                        return OutgoingMessage::ok(
+                            &event.id_str(),
+                            false,
+                            &format!("restricted: {}", err),
+                        )
+                        .into();
                     }
                 }
                 IncomingMessage::Req(_) => {
@@ -172,7 +169,8 @@ impl Extension for Auth {
                         state.map(|s| s.pubkey()).flatten(),
                         session.ip(),
                     ) {
-                        return OutgoingMessage::notice(&err.to_string()).into();
+                        increment_counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err);
+                        return OutgoingMessage::notice(&format!("restricted: {}", err)).into();
                     }
                 }
                 _ => {}

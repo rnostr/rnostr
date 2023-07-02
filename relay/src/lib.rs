@@ -16,6 +16,8 @@ pub enum Error {
     Invalid(String),
     #[error("{0}")]
     Message(String),
+    #[error("{0}")]
+    Str(&'static str),
 }
 
 impl actix_web::ResponseError for Error {}
