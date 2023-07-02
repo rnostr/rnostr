@@ -42,12 +42,18 @@ impl Extension for Metrics {
 }
 
 pub fn describe_metrics() {
-    describe_counter!("new_connections", "The total count of new connections");
-    describe_gauge!("current_connections", "The number of current connections");
-    describe_counter!("event", "The total count of event");
-    describe_counter!("req", "The total count of req");
-    describe_histogram!("db_get", "The time of per filter get");
-    describe_histogram!("db_write", "The time of per write transaction");
+    describe_counter!(
+        "nostr_relay_new_connections",
+        "The total count of new connections"
+    );
+    describe_gauge!(
+        "nostr_relay_current_connections",
+        "The number of current connections"
+    );
+    describe_counter!("nostr_relay_event", "The total count of event");
+    describe_counter!("nostr_relay_req", "The total count of req");
+    describe_histogram!("nostr_relay_db_get", "The time of per filter get");
+    describe_histogram!("nostr_relay_db_write", "The time of per write transaction");
 }
 
 pub fn create_prometheus_handle() -> PrometheusHandle {

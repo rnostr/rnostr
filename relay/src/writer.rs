@@ -57,7 +57,7 @@ impl Writer {
                 }
             }
             self.db.commit(writer)?;
-            histogram!("db_write", start.elapsed());
+            histogram!("nostr_relay_db_write", start.elapsed());
         }
         Ok(())
     }

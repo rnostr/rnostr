@@ -109,8 +109,8 @@ impl Actor for Session {
 
     /// Method is called on actor start. We start the heartbeat process here.
     fn started(&mut self, ctx: &mut Self::Context) {
-        increment_counter!("new_connections");
-        increment_gauge!("current_connections", 1.0);
+        increment_counter!("nostr_relay_new_connections");
+        increment_gauge!("nostr_relay_current_connections", 1.0);
 
         // we'll start heartbeat process on session start.
         self.hb(ctx);
@@ -143,7 +143,7 @@ impl Actor for Session {
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        decrement_gauge!("current_connections", 1.0);
+        decrement_gauge!("nostr_relay_current_connections", 1.0);
         self.app
             .clone()
             .extensions
@@ -179,10 +179,10 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                     Ok(msg) => {
                         match &msg {
                             IncomingMessage::Event(_) => {
-                                increment_counter!("event");
+                                increment_counter!("nostr_relay_event");
                             }
                             IncomingMessage::Req(_) => {
-                                increment_counter!("req");
+                                increment_counter!("nostr_relay_req");
                             }
                             _ => {}
                         }

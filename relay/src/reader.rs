@@ -29,7 +29,7 @@ impl Reader {
                     msg: OutgoingMessage::event(&msg.subscription.id, &event),
                 });
             }
-            histogram!("db_get", start.elapsed());
+            histogram!("nostr_relay_db_get", start.elapsed());
         }
         self.addr.do_send(ReadEventResult {
             id: msg.id,
