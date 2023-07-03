@@ -52,7 +52,7 @@ pub fn describe_metrics() {
         "The number of current active sessions"
     );
     describe_counter!(
-        "nostr_relay_message",
+        "nostr_relay_message_total",
         "The total count of message from client"
     );
     describe_histogram!("nostr_relay_db_get", "The time of per filter get");

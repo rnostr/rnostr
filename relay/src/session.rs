@@ -184,7 +184,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                     Ok(msg) => {
                         if let Some(cmd) = msg.known_command() {
                             // only insert known command metrics
-                            increment_counter!("nostr_relay_message", "command" => cmd);
+                            increment_counter!("nostr_relay_message_total", "command" => cmd);
                         }
 
                         let mut msg = ClientMessage {
