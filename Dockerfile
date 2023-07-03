@@ -55,9 +55,9 @@ COPY --from=planner "${SRC_DIR}/recipe.json" recipe.json
 # Build dependencies - this is the caching Docker layer
 RUN cargo chef cook --release --recipe-path recipe.json --target-dir "${BUILDER_DIR}"
 
-# Copy all files and build application
+# Copy all files and build application # --all-features
 COPY . .
-RUN cargo build --release --target-dir "${BUILDER_DIR}" --bins --all-features
+RUN cargo build --release --target-dir "${BUILDER_DIR}" --bins
 
 # Final image with binaries
 FROM debian:bullseye-slim as final
