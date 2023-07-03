@@ -261,11 +261,12 @@ fn get_event<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
     reader: &T,
     id_tree: &Tree,
     data_tree: &Tree,
+    index_tree: &Tree,
     event_id: K,
 ) -> Result<Option<(Vec<u8>, R)>, Error> {
     let uid = get_uid(reader, id_tree, event_id)?;
     if let Some(uid) = uid {
-        let event = get_event_by_uid(reader, data_tree, &uid)?;
+        let event = get_event_by_uid(reader, data_tree, index_tree, &uid)?;
         if let Some(event) = event {
             return Ok(Some((uid, event)));
         }
@@ -276,15 +277,34 @@ fn get_event<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
 fn get_event_by_uid<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
     reader: &T,
     data_tree: &Tree,
+    index_tree: &Tree,
     uid: K,
 ) -> Result<Option<R>, Error> {
-    let v = reader.get(&data_tree, uid)?;
-    if let Some(v) = v {
-        return Ok(Some(
-            R::from_data(v.as_ref()).map_err(|e| Error::Message(e.to_string()))?,
-        ));
+    if R::only_id() {
+        // get event id from index more faster
+        let v = reader.get(index_tree, uid)?;
+        let event = decode_event_index(&v)?;
+        if let Some(v) = event {
+            return Ok(Some(
+                R::from_data(v.id()).map_err(|e| Error::Message(e.to_string()))?,
+            ));
+        }
+    } else {
+        let v = reader.get(data_tree, uid)?;
+        if let Some(v) = v {
+            return Ok(Some(
+                R::from_data(v.as_ref()).map_err(|e| Error::Message(e.to_string()))?,
+            ));
+        }
     }
     Ok(None)
+}
+
+fn decode_event_index<'a>(v: &'a Option<&[u8]>) -> Result<Option<&'a ArchivedEventIndex>, Error> {
+    if let Some(v) = v {
+        return Ok(Some(EventIndex::from_zeroes(v.as_ref())?));
+    }
+    return Ok(None);
 }
 
 fn get_uid<K: AsRef<[u8]>, T: Transaction>(
@@ -410,7 +430,13 @@ impl Db {
                 if tag.0 == b"e" {
                     // let key = hex::decode(&tag.1).map_err(|e| Error::Hex(e))?;
                     let key = &tag.1;
-                    let r = get_event::<Event, _, _>(writer, &self.t_id_uid, &self.t_data, key)?;
+                    let r = get_event::<Event, _, _>(
+                        writer,
+                        &self.t_id_uid,
+                        &self.t_data,
+                        &self.t_index,
+                        key,
+                    )?;
                     if let Some((uid, e)) = r {
                         // check author or deletion event
                         // check delegator
@@ -445,7 +471,7 @@ impl Db {
                 // if event.created_at() < t {
                 //     continue;
                 // }
-                let e: Option<Event> = get_event_by_uid(writer, &self.t_data, &uid)?;
+                let e: Option<Event> = get_event_by_uid(writer, &self.t_data, &self.t_index, &uid)?;
                 if let Some(e) = e {
                     if event.created_at() < e.created_at() {
                         return Ok(CheckEventResult::ReplaceIgnored);
@@ -470,14 +496,18 @@ impl Db {
         txn: &T,
         event_id: K,
     ) -> Result<Option<R>> {
-        let event = get_event(txn, &self.t_id_uid, &self.t_data, event_id)?;
+        let event = get_event(txn, &self.t_id_uid, &self.t_data, &self.t_index, event_id)?;
         Ok(event.map(|e| e.1))
     }
 
     pub fn del<K: AsRef<[u8]>>(&self, writer: &mut Writer, event_id: K) -> Result<bool> {
-        if let Some((uid, event)) =
-            get_event::<Event, _, _>(writer, &self.t_id_uid, &self.t_data, event_id.as_ref())?
-        {
+        if let Some((uid, event)) = get_event::<Event, _, _>(
+            writer,
+            &self.t_id_uid,
+            &self.t_data,
+            &self.t_index,
+            event_id.as_ref(),
+        )? {
             self.del_event(writer, &event, &uid)?;
             Ok(true)
         } else {
@@ -966,22 +996,17 @@ where
     }
 
     fn document(&self, key: &IndexKey) -> Result<Option<J>, Error> {
-        get_event_by_uid::<J, _, _>(self.reader, &self.view_data, key.uid().to_be_bytes())
+        get_event_by_uid::<J, _, _>(
+            self.reader,
+            &self.view_data,
+            &self.view_index,
+            key.uid().to_be_bytes(),
+        )
     }
 
     fn index_data(&self, key: &IndexKey) -> Result<Option<&'txn [u8]>, Error> {
         let v = self.reader.get(&self.view_index, key.uid().to_be_bytes())?;
         Ok(v)
-    }
-
-    fn decode_event<'a>(
-        &self,
-        v: &'a Option<&[u8]>,
-    ) -> Result<Option<&'a ArchivedEventIndex>, Error> {
-        if let Some(v) = v {
-            return Ok(Some(EventIndex::from_zeroes(v.as_ref())?));
-        }
-        return Ok(None);
     }
 
     fn limit(&self, num: u64) -> bool {
@@ -1002,7 +1027,7 @@ where
                 }
             } else {
                 let data = self.index_data(&key)?;
-                let event = self.decode_event(&data)?;
+                let event = decode_event_index(&data)?;
                 self.get_index += 1;
                 if let Some(event) = event {
                     if self.match_index.r#match(&self.filter, event) {
@@ -1042,7 +1067,7 @@ where
                 }
             } else {
                 let data = self.index_data(&key)?;
-                let event = self.decode_event(&data)?;
+                let event = decode_event_index(&data)?;
                 self.get_index += 1;
                 if let Some(event) = event {
                     if self.match_index.r#match(&self.filter, event) {

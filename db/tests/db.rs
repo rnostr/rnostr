@@ -75,6 +75,15 @@ pub fn test_events() -> Result<()> {
 
     let li = db.batch_get::<Event, _, _>(vec![event.id()])?;
     assert_eq!(li.len(), 1);
+
+    let li = db.batch_get::<String, _, _>(vec![event.id()])?;
+    assert_eq!(li.len(), 1);
+    assert!(li[0].contains("nostr"));
+
+    // event id
+    let li = db.batch_get::<Vec<u8>, _, _>(vec![event.id()])?;
+    assert_eq!(li.len(), 1);
+    assert_eq!(&li[0], event.id());
     Ok(())
 }
 

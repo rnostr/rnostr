@@ -360,9 +360,25 @@ impl TryInto<String> for Event {
 
 pub trait FromEventData: Sized {
     type Err: std::error::Error;
-    fn from_data<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err>;
+    /// only pass the event id to from_data
+    fn only_id() -> bool {
+        false
+    }
+    fn from_data<S: AsRef<[u8]>>(data: S) -> Result<Self, Self::Err>;
 }
 
+/// Get the event id
+impl FromEventData for Vec<u8> {
+    type Err = Error;
+    fn only_id() -> bool {
+        true
+    }
+    fn from_data<S: AsRef<[u8]>>(data: S) -> Result<Self, Self::Err> {
+        Ok(data.as_ref().to_vec())
+    }
+}
+
+/// Get the json string
 impl FromEventData for String {
     type Err = Error;
     fn from_data<S: AsRef<[u8]>>(json: S) -> Result<Self, Self::Err> {
@@ -394,6 +410,7 @@ fn parse_data_type(json: &[u8]) -> (u8, &[u8]) {
     (0, json)
 }
 
+/// Parse the json string to event object
 impl FromEventData for Event {
     type Err = Error;
     /// decode the json data to event object

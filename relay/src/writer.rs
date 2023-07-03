@@ -1,7 +1,7 @@
 use crate::{message::*, Result};
 use actix::prelude::*;
 use metrics::histogram;
-use nostr_db::{now, Db, Event};
+use nostr_db::{now, Db};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -70,11 +70,13 @@ impl Writer {
 
     pub fn del_expired(&self) -> Result<()> {
         let reader = self.db.reader()?;
-        let iter = self.db.iter_expiration::<Event, _>(&reader, Some(now()))?;
+        let iter = self
+            .db
+            .iter_expiration::<Vec<u8>, _>(&reader, Some(now()))?;
         let mut ids = vec![];
-        for event in iter {
-            let event = event?;
-            ids.push(event.id().clone());
+        for id in iter {
+            let id = id?;
+            ids.push(id);
         }
         self.db.batch_del(ids)?;
         Ok(())
