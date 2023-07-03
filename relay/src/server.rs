@@ -207,7 +207,7 @@ impl Handler<SubscribeResult> for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{temp_db_path, Setting};
+    use crate::{temp_data_path, Setting};
     use actix_rt::time::sleep;
     use anyhow::Result;
     use parking_lot::RwLock;
@@ -228,7 +228,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn put_get() -> Result<()> {
-        let db = Arc::new(Db::open(temp_db_path("server")?)?);
+        let db = Arc::new(Db::open(temp_data_path("server")?)?);
         let note = r#"
         {
             "content": "Good morning everyone 😃",

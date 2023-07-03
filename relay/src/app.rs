@@ -98,25 +98,26 @@ pub struct App {
 }
 
 impl App {
-    /// db_path: overwrite setting db path
+    /// data_path: overwrite setting data path
     pub fn create<P: AsRef<Path>>(
         setting_path: Option<P>,
         watch: bool,
-        db_path: Option<P>,
+        setting_env_prefix: Option<String>,
+        data_path: Option<P>,
     ) -> Result<Self> {
         let extensions = Arc::new(RwLock::new(Extensions::default()));
         let c_extensions = Arc::clone(&extensions);
         let setting = if watch && setting_path.is_some() {
             let path = setting_path.as_ref().unwrap().as_ref();
             info!("Watch config {:?}", path);
-            SettingWrapper::watch(path, move |s| {
+            SettingWrapper::watch(path, setting_env_prefix, move |s| {
                 let mut w = c_extensions.write();
                 w.call_setting(s);
             })?
         } else {
             if let Some(path) = setting_path {
                 info!("Load config {:?}", path.as_ref());
-                Setting::from_file(path.as_ref())?.into()
+                Setting::read(path.as_ref(), setting_env_prefix)?.into()
             } else {
                 info!("Load default config");
                 Setting::default().into()
@@ -127,9 +128,9 @@ impl App {
         }
 
         let r = setting.read();
-        let path = db_path
+        let path = data_path
             .map(|p| p.as_ref().to_path_buf())
-            .unwrap_or(r.db.path.clone())
+            .unwrap_or(r.data.path.clone())
             .join("events");
         drop(r);
         let db = Arc::new(Db::open(path)?);

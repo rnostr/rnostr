@@ -45,7 +45,7 @@ pub use {
 };
 
 #[cfg(test)]
-pub fn temp_db_path(p: &str) -> anyhow::Result<tempfile::TempDir> {
+pub fn temp_data_path(p: &str) -> anyhow::Result<tempfile::TempDir> {
     Ok(tempfile::Builder::new()
         .prefix(&format!("nostr-relay-test-db-{}", p))
         .tempdir()?)
@@ -53,5 +53,10 @@ pub fn temp_db_path(p: &str) -> anyhow::Result<tempfile::TempDir> {
 
 #[cfg(test)]
 pub fn create_test_app(db_path: &str) -> anyhow::Result<App> {
-    Ok(App::create(None, false, Some(temp_db_path(db_path)?))?)
+    Ok(App::create(
+        None,
+        false,
+        None,
+        Some(temp_data_path(db_path)?),
+    )?)
 }

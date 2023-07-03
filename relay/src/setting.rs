@@ -1,6 +1,6 @@
 use crate::Error;
 use crate::{duration::NonZeroDuration, hash::NoOpHasherDefault, Result};
-use config::{Config, File, FileFormat};
+use config::{Config, Environment, File, FileFormat};
 use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
@@ -57,11 +57,11 @@ impl Default for Information {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(default)]
-pub struct Db {
+pub struct Data {
     pub path: PathBuf,
 }
 
-impl Default for Db {
+impl Default for Data {
     fn default() -> Self {
         Self {
             path: PathBuf::from("./data"),
@@ -163,7 +163,7 @@ impl Default for Limitation {
 #[serde(default)]
 pub struct Setting {
     pub information: Information,
-    pub db: Db,
+    pub data: Data,
     pub thread: Thread,
     pub network: Network,
     pub limitation: Limitation,
@@ -188,7 +188,7 @@ pub struct Setting {
 impl PartialEq for Setting {
     fn eq(&self, other: &Self) -> bool {
         self.information == other.information
-            && self.db == other.db
+            && self.data == other.data
             && self.thread == other.thread
             && self.network == other.network
             && self.limitation == other.limitation
@@ -220,8 +220,8 @@ impl From<Setting> for SettingWrapper {
 
 impl SettingWrapper {
     /// reload setting from file
-    pub fn reload<P: AsRef<Path>>(&self, file: P) -> Result<()> {
-        let setting = Setting::from_file(&file)?;
+    pub fn reload<P: AsRef<Path>>(&self, file: P, env_prefix: Option<String>) -> Result<()> {
+        let setting = Setting::read(&file, env_prefix)?;
         {
             let mut w = self.write();
             *w = setting;
@@ -232,9 +232,10 @@ impl SettingWrapper {
     /// config from file and watch file update then reload
     pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
         file: P,
+        env_prefix: Option<String>,
         f: F,
     ) -> Result<Self> {
-        let mut setting: SettingWrapper = Setting::from_file(&file)?.into();
+        let mut setting: SettingWrapper = Setting::read(&file, env_prefix.clone())?.into();
         let c_setting = setting.clone();
 
         // let file = current_dir()?.join(file.as_ref());
@@ -257,7 +258,7 @@ impl SettingWrapper {
                     if matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)))
                         && event.paths.contains(&c_file)
                     {
-                        match c_setting.reload(&c_file) {
+                        match c_setting.reload(&c_file, env_prefix.clone()) {
                             Ok(_) => {
                                 info!("Reload config success {:?}", c_file);
                                 info!("{:?}", c_setting.read());
@@ -362,16 +363,24 @@ impl Setting {
         Ok(serde_json::to_string_pretty(&val)?)
     }
 
-    /// config from file
-    pub fn from_file<P: AsRef<Path>>(file: P) -> Result<Self> {
+    /// read config from file and env
+    pub fn read<P: AsRef<Path>>(file: P, env_prefix: Option<String>) -> Result<Self> {
         let builder = Config::builder();
-        let config = builder
+        let mut config = builder
             // Use serde default feature, ignore the following code
             // // use defaults
             // .add_source(Config::try_from(&Self::default())?)
             // override with file contents
-            .add_source(File::with_name(file.as_ref().to_str().unwrap()))
-            .build()?;
+            .add_source(File::with_name(file.as_ref().to_str().unwrap()));
+        if let Some(prefix) = env_prefix {
+            config = config.add_source(
+                Environment::with_prefix(&prefix)
+                    .prefix_separator("_")
+                    .separator("__"),
+            );
+        }
+
+        let config = config.build()?;
         let mut setting: Setting = config.try_deserialize()?;
         setting.correct();
         Ok(setting)
@@ -408,7 +417,7 @@ mod tests {
         let json = r#"{
             "network": {"port": 1},
             "information": {"name": "test"},
-            "db": {},
+            "data": {},
             "thread": {"http": 1},
             "limitation": {}
         }"#;
@@ -457,7 +466,7 @@ mod tests {
             .rand_bytes(0)
             .tempfile()?;
 
-        let setting = Setting::from_file(&file)?;
+        let setting = Setting::read(&file, None)?;
         assert_eq!(setting.information.name, "");
         assert!(setting.information.supported_nips.contains(&1));
         fs::write(
@@ -469,8 +478,23 @@ mod tests {
         host = "127.0.0.1"
         "#,
         )?;
-        let setting = Setting::from_file(&file)?;
-        assert_eq!(setting.information.name, "nostr".to_string());
+
+        temp_env::with_vars(
+            [
+                ("NOSTR_information.description", Some("test")),
+                ("NOSTR_information__contact", Some("test")),
+                ("NOSTR_INFORMATION__PUBKEY", Some("test")),
+                ("NOSTR_NETWORK__PORT", Some("1")),
+            ],
+            || {
+                let setting = Setting::read(&file, Some("NOSTR".to_owned())).unwrap();
+                assert_eq!(setting.information.name, "nostr".to_string());
+                assert_eq!(setting.information.description, "test".to_string());
+                assert_eq!(setting.information.contact, Some("test".to_string()));
+                assert_eq!(setting.information.pubkey, Some("test".to_string()));
+                assert_eq!(setting.network.port, 1);
+            },
+        );
         Ok(())
     }
 
@@ -481,7 +505,7 @@ mod tests {
             .suffix(".toml")
             .tempfile()?;
 
-        let setting = SettingWrapper::watch(&file, |_s| {})?;
+        let setting = SettingWrapper::watch(&file, None, |_s| {})?;
         {
             let r = setting.read();
             assert_eq!(r.information.name, "");

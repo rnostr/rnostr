@@ -62,7 +62,7 @@ impl Handler<ReadEvent> for Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::temp_db_path;
+    use crate::temp_data_path;
     use actix_rt::time::sleep;
     use anyhow::Result;
     use nostr_db::{Event, Filter};
@@ -84,7 +84,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn read() -> Result<()> {
-        let db = Arc::new(Db::open(temp_db_path("reader")?)?);
+        let db = Arc::new(Db::open(temp_data_path("reader")?)?);
         let note = r#"
         {
             "content": "Good morning everyone 😃",

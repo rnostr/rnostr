@@ -126,7 +126,7 @@ mod tests {
     use std::{str::FromStr, time::Duration};
 
     use super::*;
-    use crate::temp_db_path;
+    use crate::temp_data_path;
     use actix_rt::time::sleep;
     use anyhow::Result;
     use nostr_db::Event;
@@ -147,7 +147,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn write() -> Result<()> {
-        let db = Arc::new(Db::open(temp_db_path("writer")?)?);
+        let db = Arc::new(Db::open(temp_data_path("writer")?)?);
         let note = r#"
         {
             "content": "Good morning everyone 😃",

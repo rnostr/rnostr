@@ -6,9 +6,10 @@ software = "https://github.com/arronzhang/nostr"
 # pubkey = ""
 # contact = ""
 
-# config db
-[db]
-# the db path (restart required)
+# config data path
+[data]
+# the data path (restart required)
+# the events db path is $path/events
 path = "./data"
 
 # config network
