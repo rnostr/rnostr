@@ -1,8 +1,8 @@
 # config relay information
 [information]
-name = "nostr relay"
+name = "rnostr"
 description = "A high-performance and scalable nostr relay written in Rust."
-software = "https://github.com/arronzhang/nostr"
+software = "https://github.com/rnostr/rnostr"
 # pubkey = ""
 # contact = ""
 

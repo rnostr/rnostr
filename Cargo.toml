@@ -1,5 +1,5 @@
 [package]
-name = "nostr-cli"
+name = "rnostr"
 version = "0.1.0"
 publish = false
 edition.workspace = true
@@ -10,7 +10,7 @@ authors.workspace = true
 
 [[bin]]
 path = "src/main.rs"
-name = "nostr-cli"
+name = "rnostr"
 
 [dependencies]
 actix-rt = "2.8.0"
@@ -41,6 +41,6 @@ members = [
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/arronzhang/nostr-db"
-repository = "https://github.com/arronzhang/nostr-db.git"
+homepage = "https://github.com/rnostr"
+repository = "https://github.com/rnostr/rnostr.git"
 authors = ["Arron zhang <arronzhang@me.com>"]

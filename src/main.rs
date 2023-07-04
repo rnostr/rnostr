@@ -3,11 +3,11 @@ use clap::Parser;
 #[macro_use]
 extern crate clap;
 
-use nostr_cli::*;
+use rnostr::*;
 
 /// Cli
 #[derive(Debug, Parser)]
-#[command(name = "nostr-cli", about = "Nostr cli.", version)]
+#[command(name = "rnostr", about = "Nostr cli.", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

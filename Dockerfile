@@ -6,8 +6,8 @@
 # https://github.com/LukeMathWalker/cargo-chef
 # https://github.com/RGB-WG/rgb-node/blob/master/Dockerfile
 
-ARG SRC_DIR=/usr/local/src/nostr
-ARG BUILDER_DIR=/srv/nostr
+ARG SRC_DIR=/usr/local/src/rnostr
+ARG BUILDER_DIR=/srv/rnostr
 
 # build base
 ARG BASE=base
@@ -66,11 +66,11 @@ ARG SRC_DIR
 ARG BUILDER_DIR
 
 ARG BIN_DIR=/usr/local/bin
-ARG HOME_DIR=/nostr
+ARG HOME_DIR=/rnostr
 ARG DATA_DIR=${HOME_DIR}/data
 # use dir for watch config file change
 ARG CONF_DIR=${HOME_DIR}/config
-ARG USER=nostr
+ARG USER=rnostr
 
 RUN adduser --home "${HOME_DIR}" --shell /bin/bash --disabled-login \
         --gecos "${USER} user" ${USER}
@@ -78,10 +78,9 @@ RUN mkdir ${DATA_DIR} ${CONF_DIR}
 RUN chown ${USER}:${USER} ${DATA_DIR} ${CONF_DIR}
 
 COPY --from=builder --chown=${USER}:${USER} \
-     "${BUILDER_DIR}/release/nostr-cli" "${BIN_DIR}"
+        "${BUILDER_DIR}/release/rnostr" "${BIN_DIR}"
 COPY --from=builder --chown=${USER}:${USER} \
-     "${SRC_DIR}/nostr.example.toml" "${CONF_DIR}/nostr.toml"
-
+        "${SRC_DIR}/rnostr.example.toml" "${CONF_DIR}/rnostr.toml"
 
 WORKDIR "${HOME_DIR}"
 
@@ -92,6 +91,6 @@ VOLUME "$CONF_DIR"
 
 EXPOSE 8080
 
-ENTRYPOINT ["nostr-cli"]
+ENTRYPOINT ["rnostr"]
 
-CMD ["relay", "--watch", "-c", "./config/nostr.toml"]
+CMD ["relay", "--watch", "-c", "./config/rnostr.toml"]
