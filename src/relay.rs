@@ -21,7 +21,7 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
     info!("Start relay server");
 
     actix_rt::System::new().block_on(async {
-        let app_data = App::create(Some(config), watch, Some("NOSTR".to_owned()), None).unwrap();
+        let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None).unwrap();
         app_data
             .add_extension(extensions::Metrics::new())
             .add_extension(extensions::Auth::new())
