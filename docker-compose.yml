@@ -1,0 +1,28 @@
+version: '3.8'
+networks:
+  default:
+
+services:
+
+  rnostr:
+    restart: unless-stopped
+    build:
+      context: ./
+      args:
+        # build base
+        # base: the default base
+        # mirror_cn: use mirror for china
+        - BASE=${RNOSTR_BASE:-base}
+    image: rnostr/rnostr
+    # set it to 0 if you are running as root
+    # else find the right id with the id -u command
+    #user: '0'
+    user: ${USERID}
+    ports:
+      - '8080:8080'
+    environment:
+      # log info, debug, error....
+      - RUST_LOG=${RNOSTR_LOG:-info}
+    volumes:
+      - $PWD/data:/rnostr/data
+      - $PWD/config:/rnostr/config

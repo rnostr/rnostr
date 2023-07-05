@@ -8,7 +8,11 @@ use tracing::info;
 #[derive(Debug, Clone, Parser)]
 pub struct RelayOpts {
     /// Nostr relay config path
-    #[arg(short = 'c', value_name = "PATH", default_value = "./rnostr.toml")]
+    #[arg(
+        short = 'c',
+        value_name = "PATH",
+        default_value = "./config/rnostr.toml"
+    )]
     pub config: PathBuf,
 
     /// Auto reload when config changed

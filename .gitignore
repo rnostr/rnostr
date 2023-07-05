@@ -4,6 +4,7 @@
 *.swo
 .DS_Store
 /data
+/relay/data
 /config
 
 # Added by cargo

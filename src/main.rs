@@ -1,4 +1,4 @@
-//! Nostr cli
+//! Rnostr cli
 use clap::Parser;
 #[macro_use]
 extern crate clap;
@@ -7,7 +7,7 @@ use rnostr::*;
 
 /// Cli
 #[derive(Debug, Parser)]
-#[command(name = "rnostr", about = "Nostr cli.", version)]
+#[command(name = "rnostr", about = "Rnostr cli.", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
