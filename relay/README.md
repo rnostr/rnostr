@@ -14,4 +14,4 @@ See [demo](./examples/demo.rs)
 
 ### Custom extensions
 
-See [build-in extensions](./src/extensions/)
+See [extensions demo](../extensions/examples/demo.rs)

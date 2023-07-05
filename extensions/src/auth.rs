@@ -1,10 +1,10 @@
-use crate::{
+use metrics::{describe_counter, increment_counter};
+use nostr_relay::db::now;
+use nostr_relay::{
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
     setting::SettingWrapper,
     Extension, ExtensionMessageResult, Session,
 };
-use metrics::{describe_counter, increment_counter};
-use nostr_db::now;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -183,12 +183,13 @@ impl Extension for Auth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{create_test_app, create_web_app};
+    use crate::create_test_app;
+    use nostr_relay::create_web_app;
     use actix_web::web;
     use actix_web_actors::ws;
     use anyhow::Result;
     use futures_util::{SinkExt as _, StreamExt as _};
-    use nostr_db::{
+    use nostr_relay::db::{
         secp256k1::{rand::thread_rng, KeyPair, XOnlyPublicKey},
         Event,
     };
@@ -198,7 +199,7 @@ mod tests {
             let data: T = serde_json::from_slice(text)?;
             Ok(data)
         } else {
-            Err(crate::Error::Message("invalid frame type".to_string()).into())
+            Err(nostr_relay::Error::Message("invalid frame type".to_string()).into())
         }
     }
 

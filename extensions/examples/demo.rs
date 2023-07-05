@@ -12,7 +12,12 @@ async fn main() -> nostr_relay::Result<()> {
         Some("NOSTR".to_owned()),
         None,
     )?;
-    app_data.web_server()?.await?;
+    app_data
+        .add_extension(nostr_extensions::Metrics::new())
+        .add_extension(nostr_extensions::Auth::new())
+        .add_extension(nostr_extensions::Ratelimiter::new())
+        .web_server()?
+        .await?;
     info!("Relay server shutdown");
     Ok(())
 }

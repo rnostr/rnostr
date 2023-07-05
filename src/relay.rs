@@ -1,6 +1,6 @@
 use crate::Result;
 use clap::Parser;
-use nostr_relay::{extensions, App};
+use nostr_relay::App;
 use std::path::PathBuf;
 use tracing::info;
 
@@ -27,9 +27,9 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
     actix_rt::System::new().block_on(async {
         let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None).unwrap();
         app_data
-            .add_extension(extensions::Metrics::new())
-            .add_extension(extensions::Auth::new())
-            .add_extension(extensions::Ratelimiter::new())
+            .add_extension(nostr_extensions::Metrics::new())
+            .add_extension(nostr_extensions::Auth::new())
+            .add_extension(nostr_extensions::Ratelimiter::new())
             .web_server()
             .unwrap()
             .await

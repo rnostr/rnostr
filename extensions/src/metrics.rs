@@ -1,4 +1,4 @@
-use crate::{setting::SettingWrapper, App, Extension};
+use nostr_relay::{setting::SettingWrapper, App, Extension};
 use actix_web::{web, HttpResponse};
 use metrics::{describe_counter, describe_gauge, describe_histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};

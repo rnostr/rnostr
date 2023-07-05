@@ -9,8 +9,6 @@ pub enum Error {
     #[error(transparent)]
     Notify(#[from] notify::Error),
     #[error(transparent)]
-    Prometheus(#[from] metrics_exporter_prometheus::BuildError),
-    #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("invalid: {0}")]
     Invalid(String),
@@ -27,13 +25,12 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 mod app;
 pub mod duration;
 mod extension;
-pub mod extensions;
 mod hash;
 pub mod message;
 mod reader;
 mod server;
 mod session;
-mod setting;
+pub mod setting;
 mod subscriber;
 mod writer;
 

@@ -1,14 +1,14 @@
-use crate::{
+use governor::{
+    clock::DefaultClock, state::keyed::DashMapStateStore, Quota, RateLimiter as GovernorRateLimiter,
+};
+use metrics::{describe_counter, increment_counter};
+use nostr_relay::db::Event;
+use nostr_relay::{
     duration::NonZeroDuration,
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
     setting::SettingWrapper,
     Extension, ExtensionMessageResult, Session,
 };
-use governor::{
-    clock::DefaultClock, state::keyed::DashMapStateStore, Quota, RateLimiter as GovernorRateLimiter,
-};
-use metrics::{describe_counter, increment_counter};
-use nostr_db::Event;
 use parking_lot::RwLock;
 use serde::{
     de::{self, SeqAccess, Visitor},
@@ -242,23 +242,24 @@ mod tests {
     use std::{num::NonZeroU32, str::FromStr, time::Duration};
 
     use super::*;
-    use crate::{create_test_app, create_web_app, Setting};
+    use crate::create_test_app;
     use actix_rt::time::sleep;
     use actix_web::web;
     use actix_web_actors::ws;
     use anyhow::Result;
     use futures_util::{SinkExt as _, StreamExt as _};
-    use nostr_db::{
+    use nostr_relay::db::{
         now,
         secp256k1::{rand::thread_rng, KeyPair},
     };
+    use nostr_relay::{create_web_app, Setting};
 
     fn parse_text<T: serde::de::DeserializeOwned>(frame: &ws::Frame) -> Result<T> {
         if let ws::Frame::Text(text) = &frame {
             let data: T = serde_json::from_slice(text)?;
             Ok(data)
         } else {
-            Err(crate::Error::Message("invalid frame type".to_string()).into())
+            Err(nostr_relay::Error::Message("invalid frame type".to_string()).into())
         }
     }
 
