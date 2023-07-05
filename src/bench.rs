@@ -32,12 +32,12 @@ pub fn bench_opts(mut opts: BenchOpts) -> anyhow::Result<u64> {
 pub fn bench(path: &PathBuf, filter: &Filter, count: bool) -> Result<u64> {
     fn once(db: &Db, filter: &Filter, count: bool) -> Result<(u64, Stats)> {
         let reader = db.reader()?;
-        let mut iter = db.iter::<String, _>(&reader, &filter)?;
+        let mut iter = db.iter::<String, _>(&reader, filter)?;
         if count {
             Ok(iter.size()?)
         } else {
             let mut c = 0;
-            while let Some(event) = iter.next() {
+            for event in iter.by_ref() {
                 let _json: String = event?;
                 c += 1;
             }
@@ -47,7 +47,7 @@ pub fn bench(path: &PathBuf, filter: &Filter, count: bool) -> Result<u64> {
 
     let db = Db::open(path)?;
     let now = Instant::now();
-    let res = once(&db, &filter, count)?;
+    let res = once(&db, filter, count)?;
     let elapsed = now.elapsed();
 
     println!("{:?}", filter);
@@ -62,7 +62,7 @@ pub fn bench(path: &PathBuf, filter: &Filter, count: bool) -> Result<u64> {
     println!("Bench prepare");
     let now = Instant::now();
     for _i in 0..times {
-        let _r = once(&db, &filter, count)?;
+        let _r = once(&db, filter, count)?;
     }
     let elapsed = now.elapsed();
     println!(
@@ -80,7 +80,7 @@ pub fn bench(path: &PathBuf, filter: &Filter, count: bool) -> Result<u64> {
 
     let now = Instant::now();
     for _i in 0..times {
-        let _r = once(&db, &filter, count)?;
+        let _r = once(&db, filter, count)?;
     }
     let elapsed = now.elapsed();
     println!(
@@ -92,7 +92,7 @@ pub fn bench(path: &PathBuf, filter: &Filter, count: bool) -> Result<u64> {
     println!("Bench multi-threaded");
     let now = Instant::now();
     (0..times).into_par_iter().for_each(|_| {
-        let _r = once(&db, &filter, count);
+        let _r = once(&db, filter, count);
         if let Err(e) = _r {
             println!("{:?}", e);
         }
@@ -107,7 +107,7 @@ pub fn bench(path: &PathBuf, filter: &Filter, count: bool) -> Result<u64> {
 }
 
 pub fn fmt_num(count: f64) -> String {
-    let ret = if count < 1_000.0 {
+    if count < 1_000.0 {
         format!("{:.1}", count)
     } else if count < 1_000_000.0 {
         format!("{:.1}K", count / 1_000.0)
@@ -115,8 +115,7 @@ pub fn fmt_num(count: f64) -> String {
         format!("{:.1}M", count / 1_000_000.0)
     } else {
         format!("{:.1}G", count / 1_000_000_000.0)
-    };
-    ret
+    }
 }
 
 pub fn fmt_per_sec(count: u64, dur: &Duration) -> String {

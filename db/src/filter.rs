@@ -70,7 +70,7 @@ pub struct Filter {
 impl FromStr for Filter {
     type Err = serde_json::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(serde_json::from_str(s)?)
+        serde_json::from_str(s)
     }
 }
 
@@ -101,7 +101,7 @@ impl TryFrom<_Filter> for Filter {
         let mut tags = HashMap::new();
         for item in filter.tags {
             let key = item.0;
-            if let Some(key) = key.strip_prefix("#") {
+            if let Some(key) = key.strip_prefix('#') {
                 let key = key.as_bytes();
                 // only index for key len 1
                 if key.len() == 1 {
@@ -124,7 +124,7 @@ impl TryFrom<_Filter> for Filter {
                             // }
                         }
                     }
-                    if list.len() > 0 {
+                    if !list.is_empty() {
                         tags.insert(key.to_vec(), list.into());
                     }
                 }
@@ -161,15 +161,7 @@ impl TryFrom<_Filter> for Filter {
 }
 
 fn clean_empty<T>(list: Option<Vec<T>>) -> Option<Vec<T>> {
-    if let Some(li) = list {
-        if li.is_empty() {
-            None
-        } else {
-            Some(li)
-        }
-    } else {
-        None
-    }
+    list.filter(|li| !li.is_empty())
 }
 
 impl Filter {
@@ -180,7 +172,7 @@ impl Filter {
             let s: &str = search.as_ref();
             let iter = s.segment_str();
             let vec = iter.map(|s| s.as_bytes().to_vec()).collect::<Vec<_>>();
-            if vec.len() > 0 {
+            if !vec.is_empty() {
                 self.words = Some(vec);
             }
         }
@@ -205,7 +197,7 @@ impl Filter {
                     // only index tag value length < 255
                     .filter(|s| s.len() < 255)
                     .collect::<Vec<_>>();
-                if key.len() > 0 && val.len() > 0 {
+                if !key.is_empty() && !val.is_empty() {
                     t.insert(key, val.into());
                 }
             }
@@ -242,12 +234,12 @@ impl Filter {
         event_tags: I,
     ) -> bool {
         // empty tags
-        if tags.len() == 0 {
+        if tags.is_empty() {
             return true;
         }
 
         // event has not tag
-        if event_tags.as_ref().len() == 0 {
+        if event_tags.as_ref().is_empty() {
             return false;
         }
 
@@ -266,7 +258,7 @@ impl Filter {
         list: &TagList,
     ) -> bool {
         let tags = tags.as_ref();
-        if tags.len() == 0 {
+        if tags.is_empty() {
             return false;
         }
         for tag in tags {
@@ -303,7 +295,7 @@ impl Filter {
 }
 
 fn match_prefix(prefixes: &[String], target: &[u8]) -> bool {
-    if prefixes.len() == 0 {
+    if prefixes.is_empty() {
         return true;
     }
     let target = hex::encode(target);

@@ -125,7 +125,7 @@ pub fn import<F: Fn(usize)>(
                         Some(event)
                     }
                     Err(e) => {
-                        println!("error: {} {}", s, e.to_string());
+                        println!("error: {} {}", s, e);
                         None
                     }
                 }
@@ -210,7 +210,7 @@ pub fn export_opts(opts: ExportOpts) -> anyhow::Result<usize> {
 pub fn count(path: &PathBuf, filter: &Filter) -> Result<u64> {
     let db = Db::open(path)?;
     let reader = db.reader()?;
-    let iter = db.iter::<String, _>(&reader, &filter)?;
+    let iter = db.iter::<String, _>(&reader, filter)?;
     Ok(iter.size()?.0)
 }
 
@@ -222,13 +222,13 @@ pub fn export<F: Fn(usize)>(
 ) -> Result<usize> {
     let db = Db::open(path)?;
     let reader = db.reader()?;
-    let mut iter = db.iter::<String, _>(&reader, &filter)?;
+    let iter = db.iter::<String, _>(&reader, filter)?;
     let mut count = 0;
-    while let Some(event) = iter.next() {
+    for event in iter {
         count += 1;
         let mut json: String = event?;
-        json.push_str("\n");
-        output.write(json.as_bytes())?;
+        json.push('\n');
+        output.write_all(json.as_bytes())?;
         f(count);
     }
     output.finish()?;

@@ -151,7 +151,7 @@ impl Extension for Auth {
                 IncomingMessage::Event(event) => {
                     if let Err(err) = Self::verify_permission(
                         self.setting.event.as_ref(),
-                        state.map(|s| s.pubkey()).flatten(),
+                        state.and_then(|s| s.pubkey()),
                         session.ip(),
                     ) {
                         increment_counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err);
@@ -166,7 +166,7 @@ impl Extension for Auth {
                 IncomingMessage::Req(_) => {
                     if let Err(err) = Self::verify_permission(
                         self.setting.req.as_ref(),
-                        state.map(|s| s.pubkey()).flatten(),
+                        state.and_then(|s| s.pubkey()),
                         session.ip(),
                     ) {
                         increment_counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err);

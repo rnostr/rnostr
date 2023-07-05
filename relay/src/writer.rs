@@ -34,7 +34,7 @@ impl Writer {
     }
 
     pub fn write(&mut self) -> Result<()> {
-        if self.events.len() > 0 {
+        if !self.events.is_empty() {
             debug!("write events: {:?}", self.events);
             let start = Instant::now();
             let mut writer = self.db.writer()?;

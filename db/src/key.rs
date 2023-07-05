@@ -101,12 +101,12 @@ pub fn u64_to_ver(num: u64) -> Vec<u8> {
 
 // Replaceable Events [NIP-16](https://nips.be/16)
 // Parameterized Replaceable Events [NIP-33](https://nips.be/33)
-pub fn encode_replace_key(kind: u64, pubkey: &Vec<u8>, tags: &Vec<Vec<String>>) -> Option<Vec<u8>> {
-    if kind == 0 || kind == 3 || kind == 41 || (kind >= 10_000 && kind < 20_000) {
+pub fn encode_replace_key(kind: u64, pubkey: &Vec<u8>, tags: &[Vec<String>]) -> Option<Vec<u8>> {
+    if kind == 0 || kind == 3 || kind == 41 || (10_000..20_000).contains(&kind) {
         let k = u64_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
         Some([p, &k[..]].concat())
-    } else if kind >= 30_000 && kind < 40_000 {
+    } else if (30_000..40_000).contains(&kind) {
         let k = u64_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
         let tag = tags
@@ -124,12 +124,9 @@ pub fn encode_replace_key(kind: u64, pubkey: &Vec<u8>, tags: &Vec<Vec<String>>) 
         None
     }
 }
-
+type ReplaceKey<'a> = (&'a [u8], u64, &'a [u8], u64);
 #[allow(unused)]
-pub fn decode_replace_key<'a>(
-    val: &'a [u8],
-    time: &'a [u8],
-) -> Result<(&'a [u8], u64, &'a [u8], u64), Error> {
+pub fn decode_replace_key<'a>(val: &'a [u8], time: &'a [u8]) -> Result<ReplaceKey<'a>, Error> {
     let len = val.len();
     if len < 32 + 8 {
         Err(Error::InvalidLength)
@@ -146,15 +143,15 @@ pub fn decode_replace_key<'a>(
 #[allow(unused)]
 pub fn pad_start(id: &Vec<u8>, len: usize) -> Vec<u8> {
     let num = len as i32 - id.len() as i32;
-    if num > 0 {
-        let num = num as usize;
-        let mut ret = vec![0; len];
-        ret[num..].copy_from_slice(id);
-        ret
-    } else if num < 0 {
-        id[0..len].to_vec()
-    } else {
-        id.clone()
+    match num.cmp(&0) {
+        std::cmp::Ordering::Less => id[0..len].to_vec(),
+        std::cmp::Ordering::Equal => id.clone(),
+        std::cmp::Ordering::Greater => {
+            let num = num as usize;
+            let mut ret = vec![0; len];
+            ret[num..].copy_from_slice(id);
+            ret
+        }
     }
 }
 

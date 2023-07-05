@@ -159,7 +159,7 @@ where
             let key = &cur.1;
             // scanners intersection
             let len = self.founds.len();
-            for i in (0..len).into_iter().rev() {
+            for i in (0..len).rev() {
                 let item = &self.founds[i];
                 if item.1.cmp(key).is_ne() {
                     let scanner = self.scanners.get_mut(cur.0).unwrap();

@@ -42,9 +42,15 @@ impl NonZeroDuration {
     }
 }
 
-impl Into<Duration> for NonZeroDuration {
-    fn into(self) -> Duration {
-        self.0
+// impl Into<Duration> for NonZeroDuration {
+//     fn into(self) -> Duration {
+//         self.0
+//     }
+// }
+
+impl From<NonZeroDuration> for Duration {
+    fn from(val: NonZeroDuration) -> Self {
+        val.0
     }
 }
 

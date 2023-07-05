@@ -15,6 +15,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+type Tags = Vec<(Vec<u8>, Vec<u8>)>;
+type BuildTags = (Tags, Option<u64>, Option<Vec<u8>>);
 #[derive(
     Serialize,
     Deserialize,
@@ -39,7 +41,7 @@ pub struct EventIndex {
     kind: u64,
 
     #[serde(skip)]
-    tags: Vec<(Vec<u8>, Vec<u8>)>,
+    tags: Tags,
 
     #[serde(skip)]
     expiration: Option<u64>,
@@ -50,25 +52,24 @@ pub struct EventIndex {
 }
 
 impl EventIndex {
-    pub fn from_zeroes<'a>(bytes: &'a [u8]) -> Result<&'a ArchivedEventIndex, Error> {
-        let bytes = bytes.as_ref();
+    pub fn from_zeroes(bytes: &[u8]) -> Result<&ArchivedEventIndex, Error> {
         let archived = unsafe { rkyv::archived_root::<Self>(bytes) };
         Ok(archived)
     }
 
     pub fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Error> {
         let bytes = bytes.as_ref();
-        let archived = unsafe { rkyv::archived_root::<Self>(bytes.as_ref()) };
+        let archived = unsafe { rkyv::archived_root::<Self>(bytes) };
         let deserialized: Self = archived
             .deserialize(&mut rkyv::Infallible)
             .map_err(|e| Error::Deserialization(e.to_string()))?;
-        return Ok(deserialized);
+        Ok(deserialized)
     }
 
     pub fn to_bytes(&self) -> Result<AlignedVec, Error> {
         let vec =
             rkyv::to_bytes::<_, 256>(self).map_err(|e| Error::Serialization(e.to_string()))?;
-        return Ok(vec);
+        Ok(vec)
     }
 
     pub fn new(
@@ -90,9 +91,7 @@ impl EventIndex {
         })
     }
 
-    pub fn build_index_tags(
-        tags: &Vec<Vec<String>>,
-    ) -> Result<(Vec<(Vec<u8>, Vec<u8>)>, Option<u64>, Option<Vec<u8>>), Error> {
+    pub fn build_index_tags(tags: &Vec<Vec<String>>) -> Result<BuildTags, Error> {
         let mut t = vec![];
         let mut expiration = None;
         let mut delegator = None;
@@ -170,7 +169,7 @@ impl EventIndex {
 
     pub fn is_ephemeral(&self) -> bool {
         let kind = self.kind;
-        kind >= 20_000 && kind < 30_000
+        (20_000..30_000).contains(&kind)
     }
 
     pub fn is_expired(&self, now: u64) -> bool {
@@ -212,7 +211,7 @@ impl ArchivedEventIndex {
 
     pub fn is_ephemeral(&self) -> bool {
         let kind = self.kind;
-        kind >= 20_000 && kind < 30_000
+        (20_000..30_000).contains(&kind)
     }
 
     pub fn is_expired(&self, now: u64) -> bool {
@@ -312,12 +311,12 @@ impl Event {
         tags: Vec<Vec<String>>,
         content: String,
     ) -> Result<Self, Error> {
-        let pubkey = XOnlyPublicKey::from_keypair(&key_pair)
+        let pubkey = XOnlyPublicKey::from_keypair(key_pair)
             .0
             .serialize()
             .to_vec();
         let id = hash(&pubkey, created_at, kind, &tags, &content);
-        let sig = SECP256K1.sign_schnorr(&Message::from_slice(&id)?, &key_pair);
+        let sig = SECP256K1.sign_schnorr(&Message::from_slice(&id)?, key_pair);
         Self::new(
             id,
             pubkey,
@@ -332,7 +331,7 @@ impl Event {
 
 impl AsRef<Event> for Event {
     fn as_ref(&self) -> &Event {
-        &self
+        self
     }
 }
 
@@ -400,7 +399,7 @@ impl FromEventData for String {
 }
 
 fn parse_data_type(json: &[u8]) -> (u8, &[u8]) {
-    if json.len() > 0 {
+    if !json.is_empty() {
         let last = json.len() - 1;
         let t = json[last];
         if t == 0 || t == 1 {
@@ -455,7 +454,7 @@ impl Event {
                     }
                 })
                 .collect::<Vec<_>>();
-            if vec.len() > 0 {
+            if !vec.is_empty() {
                 self.words = Some(vec);
             }
         }
@@ -528,8 +527,8 @@ impl Event {
             self.pubkey(),
             self.created_at(),
             self.kind(),
-            &self.tags(),
-            &self.content(),
+            self.tags(),
+            self.content(),
         )
     }
 
@@ -553,22 +552,18 @@ impl Event {
     /// ignore when 0
     pub fn verify_time(&self, now: u64, older: u64, newer: u64) -> Result<(), Error> {
         let time = self.created_at();
-        if 0 != older {
-            if time < now - older {
-                return Err(Error::Invalid(format!(
-                    "event creation date must be newer than {}",
-                    now - older
-                )));
-            }
+        if 0 != older && time < now - older {
+            return Err(Error::Invalid(format!(
+                "event creation date must be newer than {}",
+                now - older
+            )));
         }
 
-        if 0 != newer {
-            if time > now + newer {
-                return Err(Error::Invalid(format!(
-                    "event creation date must be older than {}",
-                    now + newer
-                )));
-            }
+        if 0 != newer && time > now + newer {
+            return Err(Error::Invalid(format!(
+                "event creation date must be older than {}",
+                now + newer
+            )));
         }
         Ok(())
     }
@@ -615,7 +610,7 @@ fn verify_delegation(
     verify_sign(&hex::decode(sig)?, &hex::decode(delegator)?, &token)?;
     let time = event.created_at();
     // check conditions
-    for cond in conditions.split("&") {
+    for cond in conditions.split('&') {
         if let Some(kind) = cond.strip_prefix("kind=") {
             let n = u64::from_str(kind)?;
             if n != event.kind() {

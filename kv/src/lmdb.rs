@@ -44,7 +44,7 @@ struct Dbi {
 
 impl Dbi {
     fn new(txn: *mut ffi::MDB_txn, name: Option<&str>, flags: c_uint) -> Result<Self> {
-        let c_name = name.map(|n| CString::new(n)).transpose()?;
+        let c_name = name.map(CString::new).transpose()?;
         let name_ptr = if let Some(ref c_name) = c_name {
             c_name.as_ptr()
         } else {
@@ -362,7 +362,7 @@ unsafe impl Send for Db {}
 unsafe impl Sync for Db {}
 
 impl Db {
-    pub fn writer<'env>(&'env self) -> Result<Writer<'env>> {
+    pub fn writer(&self) -> Result<Writer> {
         Writer::new(&self.inner)
     }
 
@@ -390,7 +390,7 @@ impl Db {
         })
     }
 
-    pub fn reader<'env>(&'env self) -> Result<Reader<'env>> {
+    pub fn reader(&self) -> Result<Reader> {
         Reader::new(&self.inner)
     }
 
@@ -503,12 +503,9 @@ impl<'txn> Iter<'txn> {
                 match from {
                     Bound::Included(start) => {
                         self.op = ffi::MDB_GET_CURRENT;
-                        match inner.get_by_key(start.as_ref(), ffi::MDB_SET_RANGE) {
-                            Err(err) => {
-                                self.err = Some(err);
-                                self.inner = None;
-                            }
-                            _ => {}
+                        if let Err(err) = inner.get_by_key(start.as_ref(), ffi::MDB_SET_RANGE) {
+                            self.err = Some(err);
+                            self.inner = None;
                         }
                     }
                     Bound::Excluded(start) => {
@@ -547,10 +544,8 @@ impl<'txn> Iterator for Iter<'txn> {
             let item = inner.get(op);
             // self.op = self.next_op;
             item.transpose()
-        } else if let Some(err) = &self.err {
-            Some(Err(err.clone()))
         } else {
-            None
+            self.err.as_ref().map(|err| Err(err.clone()))
         }
     }
 }
@@ -572,7 +567,7 @@ fn lmdb_result(err_code: c_int) -> Result<()> {
 }
 
 unsafe fn val_to_slice<'a>(val: ffi::MDB_val) -> &'a [u8] {
-    slice::from_raw_parts(val.mv_data as *const u8, val.mv_size as usize)
+    slice::from_raw_parts(val.mv_data as *const u8, val.mv_size)
 }
 
 struct IterInner<'txn> {

@@ -513,7 +513,7 @@ fn all(db: &Db, filter: &Filter) -> Result<(Vec<Event>, Stats)> {
 
 fn count(db: &Db, filter: &Filter) -> Result<(u64, Stats)> {
     let reader = db.reader()?;
-    let iter = db.iter::<String, _>(&reader, &filter)?;
+    let iter = db.iter::<String, _>(&reader, filter)?;
     iter.size()
 }
 

@@ -161,6 +161,12 @@ pub struct Ratelimiter {
     pub clear_time: Arc<RwLock<Instant>>,
 }
 
+impl Default for Ratelimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Ratelimiter {
     pub fn new() -> Self {
         describe_counter!(
@@ -212,25 +218,20 @@ impl Extension for Ratelimiter {
         if self.setting.enabled {
             self.clear();
             let ip = session.ip();
-            match &msg.msg {
-                IncomingMessage::Event(event) => {
-                    // check event limiter
-                    for (index, limiter) in self.event_limiters.iter().enumerate() {
-                        let q = &self.setting.event[index];
-                        if q.hit(event, ip) {
-                            if let Err(_) = limiter.check_key(ip) {
-                                increment_counter!("nostr_relay_rate_limiter_exceeded", "command" => "EVENT", "name" => q.name.clone());
-                                return OutgoingMessage::ok(
-                                    &event.id_str(),
-                                    false,
-                                    &format!("rate-limited: {}", q.description),
-                                )
-                                .into();
-                            }
-                        }
+            if let IncomingMessage::Event(event) = &msg.msg {
+                // check event limiter
+                for (index, limiter) in self.event_limiters.iter().enumerate() {
+                    let q = &self.setting.event[index];
+                    if q.hit(event, ip) && limiter.check_key(ip).is_err() {
+                        increment_counter!("nostr_relay_rate_limiter_exceeded", "command" => "EVENT", "name" => q.name.clone());
+                        return OutgoingMessage::ok(
+                            &event.id_str(),
+                            false,
+                            &format!("rate-limited: {}", q.description),
+                        )
+                        .into();
                     }
                 }
-                _ => {}
             }
         }
         ExtensionMessageResult::Continue(msg)

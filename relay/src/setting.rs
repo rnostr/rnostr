@@ -70,19 +70,13 @@ impl Default for Data {
 }
 
 /// number of threads config
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 #[serde(default)]
 pub struct Thread {
     /// number of http server threads
     pub http: usize,
     /// number of read event threads
     pub reader: usize,
-}
-
-impl Default for Thread {
-    fn default() -> Self {
-        Self { reader: 0, http: 0 }
-    }
 }
 
 /// network config
@@ -311,21 +305,21 @@ impl Setting {
     pub fn get_extra_json(&self, key: &str) -> Option<String> {
         self.extra
             .get(key)
-            .map(|h| serde_json::to_string(h).ok())
-            .flatten()
+            .and_then(|h| serde_json::to_string(h).ok())
+        // .map(|h| serde_json::to_string(h).ok())
+        // .flatten()
     }
 
     /// Parse extension setting from extra json string. see [`crate::extensions::Metrics`]
     pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
         self.get_extra_json(key)
-            .map(|s| {
+            .and_then(|s| {
                 let r = serde_json::from_str::<T>(&s);
                 if let Err(err) = &r {
                     error!(error = err.to_string(), "failed to parse {:?} setting", key);
                 }
                 r.ok()
             })
-            .flatten()
             .unwrap_or_default()
     }
 

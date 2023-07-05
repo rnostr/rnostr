@@ -73,7 +73,7 @@ impl Handler<Dispatch> for Subscriber {
                     if filter.r#match(index) {
                         self.addr.do_send(SubscribeResult {
                             id: *session_id,
-                            msg: OutgoingMessage::event(&sub_id, &event_str),
+                            msg: OutgoingMessage::event(sub_id, &event_str),
                             sub_id: sub_id.clone(),
                         });
                     }

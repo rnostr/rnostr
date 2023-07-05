@@ -73,7 +73,7 @@ fn latest_seq(db: &Lmdb, tree: &Tree) -> Result<u64, Error> {
     let mut iter = txn.iter_from(tree, Bound::Unbounded::<Vec<u8>>, true);
     if let Some(item) = iter.next() {
         let (k, _) = item?;
-        u64_from_bytes(k.as_ref())
+        u64_from_bytes(k)
     } else {
         Ok(0)
     }
@@ -181,7 +181,7 @@ impl Db {
 
         // put event
         let time = index_event.created_at();
-        let json = encode_event(&event)?;
+        let json = encode_event(event)?;
 
         writer.put(&self.t_data, uid, json)?;
 
@@ -293,7 +293,7 @@ fn get_event_by_uid<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
         let v = reader.get(data_tree, uid)?;
         if let Some(v) = v {
             return Ok(Some(
-                R::from_data(v.as_ref()).map_err(|e| Error::Message(e.to_string()))?,
+                R::from_data(v).map_err(|e| Error::Message(e.to_string()))?,
             ));
         }
     }
@@ -302,9 +302,9 @@ fn get_event_by_uid<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
 
 fn decode_event_index<'a>(v: &'a Option<&[u8]>) -> Result<Option<&'a ArchivedEventIndex>, Error> {
     if let Some(v) = v {
-        return Ok(Some(EventIndex::from_zeroes(v.as_ref())?));
+        return Ok(Some(EventIndex::from_zeroes(v)?));
     }
-    return Ok(None);
+    Ok(None)
 }
 
 fn get_uid<K: AsRef<[u8]>, T: Transaction>(
@@ -313,7 +313,7 @@ fn get_uid<K: AsRef<[u8]>, T: Transaction>(
     event_id: K,
 ) -> Result<Option<Vec<u8>>, Error> {
     Ok(reader
-        .get(&id_tree, event_id.as_ref())?
+        .get(id_tree, event_id.as_ref())?
         .map(|v| v.as_ref().to_vec()))
     // let mut iter = reader.iter_from(id_tree, Bound::Included(event_id.as_ref()), false);
     // if let Some(item) = iter.next() {
@@ -382,11 +382,11 @@ impl Db {
         })
     }
 
-    pub fn writer<'env>(&'env self) -> Result<Writer<'env>> {
+    pub fn writer(&self) -> Result<Writer> {
         Ok(self.inner.writer()?)
     }
 
-    pub fn reader<'env>(&'env self) -> Result<Reader<'env>> {
+    pub fn reader(&self) -> Result<Reader> {
         Ok(self.inner.reader()?)
     }
 
@@ -417,7 +417,7 @@ impl Db {
 
         // check deleted in db
         if writer
-            .get(&self.t_deletion, concat(&event_id, pubkey))?
+            .get(&self.t_deletion, concat(event_id, pubkey))?
             .is_some()
         {
             return Ok(CheckEventResult::Deleted);
@@ -463,7 +463,7 @@ impl Db {
             }
 
             // replace in the db
-            let v = writer.get(&self.t_replacement, &replace_key)?;
+            let v = writer.get(&self.t_replacement, replace_key)?;
             if let Some(v) = v {
                 let uid = v.to_vec();
                 // let t = &v[0..8];
@@ -524,7 +524,7 @@ impl Db {
         let mut events = events.into_iter().collect::<Vec<N>>();
 
         // sort for check dup
-        events.sort_by(|a, b| a.as_ref().id().cmp(&b.as_ref().id()));
+        events.sort_by(|a, b| a.as_ref().id().cmp(b.as_ref().id()));
         let mut count = 0;
 
         for (i, event) in events.iter().enumerate() {
@@ -576,9 +576,9 @@ impl Db {
         txn: &'txn T,
         filter: &Filter,
     ) -> Result<Iter<'txn, T, J>> {
-        if let Some(_) = filter.search.as_ref() {
+        if filter.search.as_ref().is_some() {
             let match_index = if filter.ids.is_some()
-                || filter.tags.len() > 0
+                || !filter.tags.is_empty()
                 || filter.authors.is_some()
                 || filter.kinds.is_some()
             {
@@ -589,13 +589,13 @@ impl Db {
             Iter::new_word(self, txn, filter, &self.t_word, match_index)
         } else if let Some(ids) = filter.ids.as_ref() {
             let match_index =
-                if filter.tags.len() > 0 || filter.authors.is_some() || filter.kinds.is_some() {
+                if !filter.tags.is_empty() || filter.authors.is_some() || filter.kinds.is_some() {
                     MatchIndex::All
                 } else {
                     MatchIndex::None
                 };
             Iter::new_prefix(self, txn, filter, ids, &self.t_id, match_index)
-        } else if filter.tags.len() > 0 {
+        } else if !filter.tags.is_empty() {
             let match_index = if filter.authors.is_some() {
                 MatchIndex::Pubkey
             } else {
@@ -678,7 +678,7 @@ fn create_iter<'a, R: Transaction>(
 ) -> LmdbIter<'a> {
     if reverse {
         let start = upper(prefix.clone())
-            .map(|p| Bound::Excluded(p))
+            .map(Bound::Excluded)
             .unwrap_or(Bound::Unbounded);
         reader.iter_from(tree, start, true)
     } else {
@@ -914,7 +914,7 @@ where
         kv_db: &Db,
         reader: &'txn R,
         filter: &Filter,
-        ids: &Vec<String>,
+        ids: &[String],
         view: &Tree,
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
@@ -942,7 +942,7 @@ where
                 filter.since,
                 filter.until,
                 Box::new(move |s, r| {
-                    let k = r.0.as_ref();
+                    let k = r.0;
                     let ok = if odd {
                         hex::encode(k).as_bytes().starts_with(&s.key)
                     } else {

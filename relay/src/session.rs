@@ -227,10 +227,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                         };
                     }
                     Err(err) => {
-                        ctx.text(OutgoingMessage::notice(&format!(
-                            "json error: {}",
-                            err.to_string()
-                        )));
+                        ctx.text(OutgoingMessage::notice(&format!("json error: {}", err)));
                     }
                 };
             }

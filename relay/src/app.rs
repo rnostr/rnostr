@@ -114,15 +114,14 @@ impl App {
                 let mut w = c_extensions.write();
                 w.call_setting(s);
             })?
+        } else if let Some(path) = setting_path {
+            info!("Load config {:?}", path.as_ref());
+            Setting::read(path.as_ref(), setting_env_prefix)?.into()
         } else {
-            if let Some(path) = setting_path {
-                info!("Load config {:?}", path.as_ref());
-                Setting::read(path.as_ref(), setting_env_prefix)?.into()
-            } else {
-                info!("Load default config");
-                Setting::default().into()
-            }
+            info!("Load default config");
+            Setting::default().into()
         };
+
         {
             info!("{:?}", setting.read());
         }

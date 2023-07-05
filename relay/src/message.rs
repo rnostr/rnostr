@@ -280,9 +280,15 @@ impl Display for OutgoingMessage {
     }
 }
 
-impl Into<ByteString> for OutgoingMessage {
-    fn into(self) -> ByteString {
-        ByteString::from(self.0)
+// impl Into<ByteString> for OutgoingMessage {
+//     fn into(self) -> ByteString {
+//         ByteString::from(self.0)
+//     }
+// }
+
+impl From<OutgoingMessage> for ByteString {
+    fn from(val: OutgoingMessage) -> Self {
+        ByteString::from(val.0)
     }
 }
 

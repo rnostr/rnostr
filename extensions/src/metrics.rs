@@ -24,6 +24,12 @@ impl Metrics {
     }
 }
 
+impl Default for Metrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Extension for Metrics {
     fn name(&self) -> &'static str {
         "metrics"
