@@ -31,6 +31,18 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 - [ ] NIP-45: Counting results
 - [ ] NIP-50: Keywords filter
 
+### Extensions
+
+The library [nostr-relay](./relay/) implements a simple extension mechanism to intercept user messages for custom processing. rnostr is built on top of [nostr-relay](./relay/) and implements several simple extensions.
+
+- Metrics - Provide metrics url for [prometheus](https://prometheus.io/) scrape
+- Auth - NIP-42 Authentication, ip, pubkey whitelist and blacklist
+- Rate limiter - Limit event write frequency.
+
+All extensions support configuration in the [config file](./rnostr.example.toml).
+
+[Custom relay and extensions](./relay/).
+
 ## Usage
 
 ### Prepare source and config
