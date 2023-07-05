@@ -184,11 +184,11 @@ impl Extension for Auth {
 mod tests {
     use super::*;
     use crate::create_test_app;
-    use nostr_relay::create_web_app;
     use actix_web::web;
     use actix_web_actors::ws;
     use anyhow::Result;
     use futures_util::{SinkExt as _, StreamExt as _};
+    use nostr_relay::create_web_app;
     use nostr_relay::db::{
         secp256k1::{rand::thread_rng, KeyPair, XOnlyPublicKey},
         Event,
