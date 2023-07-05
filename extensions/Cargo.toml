@@ -1,6 +1,7 @@
 [package]
 name = "nostr-extensions"
 version = "0.1.0"
+description = "Nostr relay extensions."
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
