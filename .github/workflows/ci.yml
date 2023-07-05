@@ -24,7 +24,7 @@ jobs:
       matrix:
         rust:
           - version: stable
-          - version: 1.64.0 #MSRV
+          - version: 1.65.0 #MSRV
         build-args:
           [
             -p nostr-kv,
