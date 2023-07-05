@@ -2,7 +2,7 @@
 name = "nostr-db"
 version = "0.1.0"
 description = "Nostr event database"
-keywords = ["nostr"]
+keywords = ["nostr", "db", "lmdb"]
 exclude = [".gitignore"]
 edition.workspace = true
 license.workspace = true

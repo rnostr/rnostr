@@ -2,6 +2,7 @@
 name = "rnostr"
 version = "0.1.0"
 description = "A high-performance and scalable nostr relay."
+keywords = ["nostr", "nostr-relay"]
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
