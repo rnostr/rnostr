@@ -1,7 +1,6 @@
 [package]
 name = "rnostr"
 version = "0.1.0"
-publish = false
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
