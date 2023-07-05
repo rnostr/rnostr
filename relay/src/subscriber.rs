@@ -138,9 +138,11 @@ mod tests {
             .await?;
 
         sleep(Duration::from_millis(100)).await;
-        let r = messages.read();
-        assert_eq!(r.len(), 0);
-        drop(r);
+        {
+            let r = messages.read();
+            assert_eq!(r.len(), 0);
+            drop(r);
+        }
 
         let res = subscriber
             .send(Subscribe {

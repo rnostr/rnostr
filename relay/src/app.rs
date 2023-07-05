@@ -129,7 +129,7 @@ impl App {
         let r = setting.read();
         let path = data_path
             .map(|p| p.as_ref().to_path_buf())
-            .unwrap_or(r.data.path.clone())
+            .unwrap_or_else(|| r.data.path.clone())
             .join("events");
         drop(r);
         let db = Arc::new(Db::open(path)?);

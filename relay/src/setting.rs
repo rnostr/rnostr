@@ -243,7 +243,7 @@ impl SettingWrapper {
 
         let dir = file
             .parent()
-            .ok_or(Error::Message("failed to get config dir".to_owned()))?;
+            .ok_or_else(|| Error::Message("failed to get config dir".to_owned()))?;
 
         let mut watcher = RecommendedWatcher::new(
             move |result: Result<Event, notify::Error>| match result {
