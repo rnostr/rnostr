@@ -160,11 +160,11 @@ impl EventIndex {
     }
 
     pub fn expiration(&self) -> Option<&u64> {
-        return self.expiration.as_ref();
+        self.expiration.as_ref()
     }
 
     pub fn delegator(&self) -> Option<&Vec<u8>> {
-        return self.delegator.as_ref();
+        self.delegator.as_ref()
     }
 
     pub fn is_ephemeral(&self) -> bool {
@@ -202,11 +202,11 @@ impl ArchivedEventIndex {
     }
 
     pub fn expiration(&self) -> Option<&u64> {
-        return self.expiration.as_ref();
+        self.expiration.as_ref()
     }
 
     pub fn delegator(&self) -> Option<&ArchivedVec<u8>> {
-        return self.delegator.as_ref();
+        self.delegator.as_ref()
     }
 
     pub fn is_ephemeral(&self) -> bool {

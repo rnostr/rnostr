@@ -447,13 +447,13 @@ mod tests {
             .tags
             .get(&b"e".to_vec())
             .unwrap()
-            .contains(&vec![0u8; 32]));
+            .contains(vec![0u8; 32]));
         let filter = Filter::from_str(note)?;
         assert!(filter
             .tags
             .get(&b"p".to_vec())
             .unwrap()
-            .contains(&vec![0u8; 32]));
+            .contains(vec![0u8; 32]));
         Ok(())
     }
 

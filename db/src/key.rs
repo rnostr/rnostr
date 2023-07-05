@@ -180,7 +180,7 @@ mod tests {
         let tag_val = "m";
         let uid_num = 2u64;
         let uid: Vec<u8> = uid_num.to_be_bytes().to_vec();
-        let ind = IndexKey::from(&IndexKey::encode_id(&id, time), &uid)?;
+        let ind = IndexKey::from(&IndexKey::encode_id(id, time), &uid)?;
         assert_eq!(ind.uid, uid_num);
         assert_eq!(ind.time, time);
 
@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(ind.uid, uid_num);
         assert_eq!(ind.time, time);
 
-        let ind = IndexKey::from(&IndexKey::encode_tag(&tag_key, &tag_val, time), &uid)?;
+        let ind = IndexKey::from(&IndexKey::encode_tag(tag_key, tag_val, time), &uid)?;
         assert_eq!(ind.uid, uid_num);
         assert_eq!(ind.time, time);
 
@@ -214,7 +214,7 @@ mod tests {
         let empty: Vec<u8> = vec![];
 
         assert!(encode_replace_key(1, &pubkey, &tags).is_none());
-        assert!(decode_replace_key(&vec![1], &time).is_err());
+        assert!(decode_replace_key(&[1], &time).is_err());
 
         let k = encode_replace_key(0, &pubkey, &tags).unwrap();
         let r = decode_replace_key(&k, &time).unwrap();

@@ -82,7 +82,7 @@ fn latest_seq(db: &Lmdb, tree: &Tree) -> Result<u64, Error> {
 #[cfg(feature = "zstd")]
 fn encode_event(event: &Event) -> Result<Vec<u8>> {
     let json = event.to_json()?;
-    let mut json = zstd::encode_all(json.as_bytes(), 5).map_err(|e| Error::Io(e))?;
+    let mut json = zstd::encode_all(json.as_bytes(), 5).map_err(Error::Io)?;
     json.push(1);
     Ok(json)
 }
