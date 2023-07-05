@@ -10,7 +10,7 @@ authors.workspace = true
 
 [dependencies]
 
-nostr-relay = { path = "../relay" }
+nostr-relay = { version = "0.1.0", path = "../relay" }
 metrics = "0.21.0"
 metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = [
     "push-gateway",

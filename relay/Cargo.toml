@@ -22,7 +22,7 @@ config = { version = "0.13.3", features = [
 duration-str = { version = "0.5.1", default-features = false }
 hex = "0.4.3"
 metrics = "0.21.0"
-nostr-db = { path = "../db" }
+nostr-db = { version = "0.1.0", path = "../db" }
 notify = "6.0.0"
 num_cpus = "1.15.0"
 parking_lot = "0.12.1"

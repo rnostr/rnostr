@@ -17,9 +17,9 @@ anyhow = "1.0.70"
 clap = { version = "4.2.7", features = ["derive"] }
 clio = { version = "0.2.7", features = ["clap-parse"] }
 indicatif = "0.17.3"
-nostr-db = { path = "./db", features = ["search"] }
-nostr-relay = { path = "./relay" }
-nostr-extensions = { path = "./extensions" }
+nostr-db = { version = "0.1.0", path = "./db", features = ["search"] }
+nostr-relay = { version = "0.1.0", path = "./relay" }
+nostr-extensions = { version = "0.1.0", path = "./extensions" }
 rayon = "1.7.0"
 thiserror = "1.0.40"
 tracing = "0.1.37"
