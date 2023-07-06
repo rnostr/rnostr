@@ -36,7 +36,7 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 /// import options
 #[derive(Debug, Clone, Parser)]
 pub struct ImportOpts {
-    /// Nostr db path
+    /// Nostr events data directory path. The "rnostr.example.toml" default setting is "data/events"
     #[arg(value_name = "PATH")]
     pub path: PathBuf,
 
@@ -52,7 +52,7 @@ pub struct ImportOpts {
 /// export options
 #[derive(Debug, Clone, Parser)]
 pub struct ExportOpts {
-    /// Nostr db path
+    /// Nostr events data directory path. The "rnostr.example.toml" default setting is "data/events"
     #[arg(value_name = "PATH")]
     pub path: PathBuf,
 

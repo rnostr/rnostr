@@ -10,7 +10,7 @@ use std::{
 /// bench options
 #[derive(Debug, Clone, Parser)]
 pub struct BenchOpts {
-    /// Nostr db path
+    /// Nostr events data directory path. The "rnostr.example.toml" default setting is "data/events"
     #[arg(value_name = "PATH")]
     pub path: PathBuf,
 
