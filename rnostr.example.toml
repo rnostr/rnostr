@@ -91,6 +91,9 @@ enabled = false
 # # Restrict on nip42 verified pubkey, so client needs to implement nip42 and authenticate success
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
+# # Restrict on event author pubkey, No need nip42 authentication
+# event_pubkey_whitelist = ["xxxxxx"]
+# event_pubkey_blacklist = ["xxxx"]
 
 # IP Rate limiter extension
 [rate_limiter]

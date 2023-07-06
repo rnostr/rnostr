@@ -15,6 +15,8 @@ pub struct Permission {
     pub pubkey_whitelist: Option<Vec<String>>,
     pub ip_blacklist: Option<Vec<String>>,
     pub pubkey_blacklist: Option<Vec<String>>,
+    pub event_pubkey_whitelist: Option<Vec<String>>,
+    pub event_pubkey_blacklist: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -66,6 +68,7 @@ impl Auth {
     pub fn verify_permission(
         permission: Option<&Permission>,
         pubkey: Option<&String>,
+        event_pubkey: Option<&String>,
         ip: &String,
     ) -> Result<(), &'static str> {
         if let Some(permission) = permission {
@@ -79,6 +82,20 @@ impl Auth {
                     return Err("ip in blacklist");
                 }
             }
+
+            if let Some(pubkey) = event_pubkey {
+                if let Some(list) = &permission.event_pubkey_whitelist {
+                    if !list.contains(pubkey) {
+                        return Err("event author pubkey not in whitelist");
+                    }
+                }
+                if let Some(list) = &permission.event_pubkey_blacklist {
+                    if list.contains(pubkey) {
+                        return Err("event author pubkey in blacklist");
+                    }
+                }
+            }
+
             if let Some(list) = &permission.pubkey_whitelist {
                 if let Some(pubkey) = pubkey {
                     if !list.contains(pubkey) {
@@ -152,6 +169,7 @@ impl Extension for Auth {
                     if let Err(err) = Self::verify_permission(
                         self.setting.event.as_ref(),
                         state.and_then(|s| s.pubkey()),
+                        Some(&event.pubkey_str()),
                         session.ip(),
                     ) {
                         increment_counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err);
@@ -167,6 +185,7 @@ impl Extension for Auth {
                     if let Err(err) = Self::verify_permission(
                         self.setting.req.as_ref(),
                         state.and_then(|s| s.pubkey()),
+                        None,
                         session.ip(),
                     ) {
                         increment_counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err);
@@ -211,6 +230,7 @@ mod tests {
                 ..Default::default()
             }),
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_ok());
@@ -220,6 +240,7 @@ mod tests {
                 ..Default::default()
             }),
             None,
+            None,
             &"127.0.0.2".to_owned()
         )
         .is_err());
@@ -230,6 +251,7 @@ mod tests {
                 ..Default::default()
             }),
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -238,6 +260,7 @@ mod tests {
                 ip_blacklist: Some(vec!["127.0.0.1".to_string()]),
                 ..Default::default()
             }),
+            None,
             None,
             &"127.0.0.2".to_owned()
         )
@@ -249,6 +272,7 @@ mod tests {
                 ..Default::default()
             }),
             Some(&"xx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_ok());
@@ -258,6 +282,7 @@ mod tests {
                 ..Default::default()
             }),
             Some(&"xxxx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -268,6 +293,7 @@ mod tests {
                 ..Default::default()
             }),
             Some(&"xx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -276,6 +302,49 @@ mod tests {
                 pubkey_blacklist: Some(vec!["xx".to_string()]),
                 ..Default::default()
             }),
+            Some(&"xxxx".to_owned()),
+            None,
+            &"127.0.0.1".to_owned()
+        )
+        .is_ok());
+
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                event_pubkey_whitelist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            Some(&"xx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_ok());
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                event_pubkey_whitelist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            Some(&"xxxx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_err());
+
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                event_pubkey_blacklist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            None,
+            Some(&"xx".to_owned()),
+            &"127.0.0.1".to_owned()
+        )
+        .is_err());
+        assert!(Auth::verify_permission(
+            Some(&Permission {
+                event_pubkey_blacklist: Some(vec!["xx".to_string()]),
+                ..Default::default()
+            }),
+            None,
             Some(&"xxxx".to_owned()),
             &"127.0.0.1".to_owned()
         )
