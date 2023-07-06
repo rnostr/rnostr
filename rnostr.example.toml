@@ -74,21 +74,21 @@ auth = "auth_key"
 [auth]
 enabled = false
 
-# # Authenticate the command 'REQ' 
+# # Authenticate the command 'REQ' get event, subscribe filter
 # [auth.req]
 # # only the list IP are allowed to req
 # ip_whitelist = ["127.0.0.1"]
 # # only the list IP are denied to req
 # ip_blacklist = ["127.0.0.1"]
-# # need auth when list provide
+# # Restrict on nip42 verified pubkey, so client needs to implement nip42 and authenticate success
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
 
-# # Authenticate the command 'EVENT' 
+# # Authenticate the command 'EVENT' write event
 # [auth.event]
 # ip_whitelist = ["127.0.0.1"]
 # ip_blacklist = ["127.0.0.1"]
-# # need auth when list provide
+# # Restrict on nip42 verified pubkey, so client needs to implement nip42 and authenticate success
 # pubkey_whitelist = ["xxxxxx"]
 # pubkey_blacklist = ["xxxx"]
 
