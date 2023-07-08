@@ -1,6 +1,8 @@
 use nostr_db::{Db, Error, Event, Filter, Stats};
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::thread::sleep;
+use std::time::Duration;
 
 type Result<T, E = Error> = core::result::Result<T, E>;
 
@@ -44,6 +46,17 @@ pub fn create_db(t: &str) -> Result<Db> {
         .tempdir()
         .unwrap();
     Db::open(dir.path())
+}
+
+const PREFIX: [u8; 29] = [0; 29];
+const PER_NUM: u8 = 30;
+
+fn author(index: u8) -> Vec<u8> {
+    [PREFIX.to_vec(), vec![1u8, 0, index]].concat()
+}
+
+fn id(p: u8, index: u8) -> Vec<u8> {
+    [PREFIX.to_vec(), vec![1u8, p, index]].concat()
 }
 
 #[test]
@@ -1254,13 +1267,40 @@ pub fn test_query_search() -> Result<()> {
     Ok(())
 }
 
-const PREFIX: [u8; 29] = [0; 29];
-const PER_NUM: u8 = 30;
+#[test]
+pub fn test_query_scan_limit_time() -> Result<()> {
+    let db = create_db("test_query_scan_limit_time")?;
 
-fn author(index: u8) -> Vec<u8> {
-    [PREFIX.to_vec(), vec![1u8, 0, index]].concat()
-}
+    // author 1
+    let events = (0..PER_NUM)
+        .map(|i| {
+            MyEvent {
+                id: id(0, i),
+                pubkey: author(10),
+                kind: 1,
+                content: "author 1".to_owned(),
+                created_at: i as u64 * 1000,
+                ..Default::default()
+            }
+            .into()
+        })
+        .collect::<Vec<Event>>();
+    db.batch_put(events)?;
 
-fn id(p: u8, index: u8) -> Vec<u8> {
-    [PREFIX.to_vec(), vec![1u8, p, index]].concat()
+    let filter = Filter {
+        ..Default::default()
+    };
+
+    {
+        let reader = db.reader()?;
+        let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+        iter.scan_time(Duration::from_millis(100), 2);
+        let res = iter.try_for_each(|k| {
+            sleep(Duration::from_millis(50));
+            k.map(|_k| ())
+        });
+        assert!(matches!(res, Err(Error::ScanTimeout)));
+    }
+
+    Ok(())
 }

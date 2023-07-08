@@ -16,6 +16,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    time::{Duration, Instant},
 };
 
 type Result<T, E = Error> = core::result::Result<T, E>;
@@ -1048,6 +1049,23 @@ where
     R: Transaction,
     J: FromEventData,
 {
+    /// Limit the total scan time and report [`Error::ScanTimeout`] if it is exceeded
+    pub fn scan_time(&mut self, timeout: Duration, check_step: u64) {
+        let start = Instant::now();
+        let mut last = check_step;
+        self.group.watcher(Box::new(move |count| {
+            if count > last {
+                // check
+                if start.elapsed() > timeout {
+                    return Err(Error::ScanTimeout);
+                }
+                last = count + check_step;
+            }
+            Ok(())
+        }));
+    }
+
+    /// The stats after scan
     pub fn stats(&self) -> Stats {
         Stats {
             scan_index: self.group.scan_index,
@@ -1056,6 +1074,7 @@ where
         }
     }
 
+    /// only count iter size
     pub fn size(mut self) -> Result<(u64, Stats)> {
         let mut len = 0;
         while let Some(item) = self.group.next() {

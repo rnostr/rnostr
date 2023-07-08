@@ -1,3 +1,6 @@
+# Configuration
+# All duration format reference https://docs.rs/duration-str/latest/duration_str/
+#
 # config relay information
 [information]
 name = "rnostr"
@@ -11,6 +14,9 @@ software = "https://github.com/rnostr/rnostr"
 # the data path (restart required)
 # the events db path is $path/events
 path = "./data"
+
+# Query filter timeout time, default no timeout.
+db_query_timeout = "100ms"
 
 # config network
 [network]

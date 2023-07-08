@@ -80,7 +80,7 @@ type GroupItem<K, E> = Result<K, E>;
 /// Get the scanners intersection if and.
 type ShortItemType = usize;
 
-type ScannerWatcher<E> = Box<dyn Fn(u64) -> Result<(), E>>;
+type ScannerWatcher<E> = Box<dyn FnMut(u64) -> Result<(), E>>;
 
 pub struct Group<'txn, K, E>
 where
@@ -121,8 +121,8 @@ where
         self.watcher = Some(watcher);
     }
 
-    fn watch(&self) -> Result<(), E> {
-        if let Some(watcher) = &self.watcher {
+    fn watch(&mut self) -> Result<(), E> {
+        if let Some(watcher) = &mut self.watcher {
             watcher(self.scan_index)?;
         }
         Ok(())
@@ -266,7 +266,11 @@ where
         if let Some(scanner) = &mut self.onlyone {
             let item = scanner.next();
             self.scan_index += scanner.cur_times;
-            item
+            if let Err(err) = self.watch() {
+                Some(Err(err))
+            } else {
+                item
+            }
         } else {
             if self.founds.is_empty() || self.done {
                 return None;

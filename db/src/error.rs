@@ -24,4 +24,6 @@ pub enum Error {
     InvalidLength,
     #[error("message: {0}")]
     Message(String),
+    #[error("Scan timeout")]
+    ScanTimeout,
 }

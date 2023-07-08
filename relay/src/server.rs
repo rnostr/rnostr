@@ -29,8 +29,9 @@ impl Server {
             let subscriber = Subscriber::new(ctx.address().recipient(), setting.clone()).start();
             let addr = ctx.address().recipient();
             info!("starting {} reader workers", num);
-            let reader =
-                SyncArbiter::start(num, move || Reader::new(Arc::clone(&db), addr.clone()));
+            let reader = SyncArbiter::start(num, move || {
+                Reader::new(Arc::clone(&db), addr.clone(), setting.clone())
+            });
 
             Server {
                 id: 0,

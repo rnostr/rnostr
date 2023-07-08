@@ -1,4 +1,4 @@
-use crate::{message::*, Result};
+use crate::{message::*, setting::SettingWrapper, Result};
 use actix::prelude::*;
 use metrics::histogram;
 use nostr_db::Db;
@@ -9,18 +9,23 @@ use std::{sync::Arc, time::Instant};
 pub struct Reader {
     pub db: Arc<Db>,
     pub addr: Recipient<ReadEventResult>,
+    pub setting: SettingWrapper,
 }
 
 impl Reader {
-    pub fn new(db: Arc<Db>, addr: Recipient<ReadEventResult>) -> Self {
-        Self { db, addr }
+    pub fn new(db: Arc<Db>, addr: Recipient<ReadEventResult>, setting: SettingWrapper) -> Self {
+        Self { db, addr, setting }
     }
 
     pub fn read(&self, msg: &ReadEvent) -> Result<()> {
         let reader = self.db.reader()?;
+        let timeout = self.setting.read().data.db_query_timeout;
         for filter in &msg.subscription.filters {
             let start = Instant::now();
-            let iter = self.db.iter::<String, _>(&reader, filter)?;
+            let mut iter = self.db.iter::<String, _>(&reader, filter)?;
+            if let Some(time) = timeout {
+                iter.scan_time(time.into(), 2000);
+            }
             for event in iter {
                 let event = event?;
                 self.addr.do_send(ReadEventResult {
@@ -49,11 +54,11 @@ impl Actor for Reader {
 impl Handler<ReadEvent> for Reader {
     type Result = ();
     fn handle(&mut self, msg: ReadEvent, _: &mut Self::Context) {
-        if let Err(_err) = self.read(&msg) {
+        if let Err(err) = self.read(&msg) {
             self.addr.do_send(ReadEventResult {
                 id: msg.id,
                 sub_id: msg.subscription.id,
-                msg: OutgoingMessage::notice("get event error"),
+                msg: OutgoingMessage::notice(&format!("get event error: {}", err)),
             });
         }
     }
@@ -62,7 +67,7 @@ impl Handler<ReadEvent> for Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::temp_data_path;
+    use crate::{temp_data_path, Setting};
     use actix_rt::time::sleep;
     use anyhow::Result;
     use nostr_db::{Event, Filter};
@@ -104,7 +109,9 @@ mod tests {
         let receiver = receiver.start();
         let addr = receiver.recipient();
 
-        let reader = SyncArbiter::start(3, move || Reader::new(Arc::clone(&db), addr.clone()));
+        let reader = SyncArbiter::start(3, move || {
+            Reader::new(Arc::clone(&db), addr.clone(), Setting::default().into())
+        });
 
         for i in 0..4 {
             reader

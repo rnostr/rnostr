@@ -59,12 +59,16 @@ impl Default for Information {
 #[serde(default)]
 pub struct Data {
     pub path: PathBuf,
+
+    /// Query filter timeout time
+    pub db_query_timeout: Option<NonZeroDuration>,
 }
 
 impl Default for Data {
     fn default() -> Self {
         Self {
             path: PathBuf::from("./data"),
+            db_query_timeout: None,
         }
     }
 }
@@ -310,7 +314,7 @@ impl Setting {
         // .flatten()
     }
 
-    /// Parse extension setting from extra json string. see [`crate::extensions::Metrics`]
+    /// Parse extension setting from extra json string.
     pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
         self.get_extra_json(key)
             .and_then(|s| {
