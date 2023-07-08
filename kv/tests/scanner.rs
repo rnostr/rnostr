@@ -5,6 +5,7 @@ use nostr_kv::{
     Error,
 };
 use std::ops::Bound;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 struct Key<'txn> {
@@ -58,6 +59,15 @@ impl<'txn> TimeKey for Key<'txn> {
 pub enum MyError {
     #[error(transparent)]
     Db(#[from] Error),
+    #[error("long query")]
+    LongQuery,
+}
+
+pub fn now() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros()
 }
 
 #[test]
@@ -158,6 +168,39 @@ pub fn test_scanner() -> Result<()> {
     let k = group.next().unwrap()?;
     assert_eq!(k.uid(), 3u64.to_be_bytes());
     assert!(group.next().is_none());
+
+    // watch
+    let mut group = Group::new(false, false, true);
+    group.watcher(Box::new(|count| {
+        if count > 3 {
+            Err(MyError::LongQuery)
+        } else {
+            Ok(())
+        }
+    }));
+    for i in 1u64..4 {
+        let prefix = i.to_be_bytes().to_vec();
+        let iter = reader.iter_from(&tree, Bound::Included(&prefix), false);
+        let scanner = Scanner::<_, MyError>::new(
+            iter,
+            prefix.clone(),
+            prefix.clone(),
+            false,
+            None,
+            None,
+            Box::new(|s, (k, v)| {
+                Ok(if k.starts_with(&s.prefix) {
+                    MatchResult::Found(Key::from(k, v))
+                } else {
+                    MatchResult::Stop
+                })
+            }),
+        );
+        group.add(scanner)?;
+    }
+
+    let res = group.try_for_each(|k| k.map(|_k| ()));
+    assert!(matches!(res, Err(MyError::LongQuery)));
 
     Ok(())
 }

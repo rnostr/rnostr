@@ -79,6 +79,9 @@ type GroupItem<K, E> = Result<K, E>;
 /// Query in a group of scanners in a given time sequence.
 /// Get the scanners intersection if and.
 type ShortItemType = usize;
+
+type ScannerWatcher<E> = Box<dyn Fn(u64) -> Result<(), E>>;
+
 pub struct Group<'txn, K, E>
 where
     K: TimeKey,
@@ -92,6 +95,7 @@ where
     done: bool,
     // one id has more than one key
     dup: bool,
+    watcher: Option<ScannerWatcher<E>>,
 }
 
 impl<'txn, K, E> Group<'txn, K, E>
@@ -108,7 +112,20 @@ where
             and,
             done: false,
             dup,
+            watcher: None,
         }
+    }
+
+    /// Set the watcher for watching number of scans, stop scanning
+    pub fn watcher(&mut self, watcher: ScannerWatcher<E>) {
+        self.watcher = Some(watcher);
+    }
+
+    fn watch(&self) -> Result<(), E> {
+        if let Some(watcher) = &self.watcher {
+            watcher(self.scan_index)?;
+        }
+        Ok(())
     }
 
     pub fn add(&mut self, scanner: Scanner<'txn, K, E>) -> Result<(), E> {
@@ -165,6 +182,8 @@ where
                     let scanner = self.scanners.get_mut(cur.0).unwrap();
                     let item = scanner.next();
                     self.scan_index += scanner.cur_times;
+                    self.watch()?;
+
                     if let Some(item) = item {
                         self.founds.add(cur.0, item?);
                         continue 'go;
@@ -180,6 +199,7 @@ where
             let scanner = self.scanners.get_mut(cur.0).unwrap();
             let item = scanner.next();
             self.scan_index += scanner.cur_times;
+            self.watch()?;
             if let Some(item) = item {
                 self.founds.add(cur.0, item?);
             } else {
@@ -214,6 +234,7 @@ where
                 let scanner = self.scanners.get_mut(cur.0).unwrap();
                 let item = scanner.next();
                 self.scan_index += scanner.cur_times;
+                self.watch()?;
                 if let Some(item) = item {
                     self.founds.add(cur.0, item?);
                 }
@@ -226,6 +247,7 @@ where
         let scanner = self.scanners.get_mut(cur.0).unwrap();
         let item = scanner.next();
         self.scan_index += scanner.cur_times;
+        self.watch()?;
         if let Some(item) = item {
             self.founds.add(cur.0, item?);
         }
