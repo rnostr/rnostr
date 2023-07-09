@@ -28,20 +28,40 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 - [x] NIP-33: Parameterized Replaceable Events
 - [x] NIP-40: Expiration Timestamp
 - [x] NIP-42: Authentication of clients to relays
-- [ ] NIP-45: Counting results
-- [ ] NIP-50: Keywords filter
+- [x] NIP-45: Counting results. [experimental](#count)
+- [x] NIP-50: Keywords filter. [experimental](#search)
 
 ### Extensions
 
 The library [nostr-relay](./relay/) implements a simple extension mechanism to intercept user messages for custom processing. rnostr is built on top of [nostr-relay](./relay/) and implements several simple extensions.
-
-- Metrics - Provide metrics url for [prometheus](https://prometheus.io/) scrape
-- Auth - NIP-42 Authentication, ip, pubkey whitelist and blacklist
-- Rate limiter - Limit event write frequency.
-
 All extensions support configuration in the [config file](./rnostr.example.toml).
 
 [Custom relay and extensions](./relay/).
+
+#### Metrics
+
+Provide metrics url for [prometheus](https://prometheus.io/) scrape
+
+#### Auth
+
+[NIP-42](https://nips.be/42) Authentication, ip, auth pubkey and event pubkey whitelist blacklist
+
+#### Rate limiter
+
+Limit event write frequency.
+
+#### Count
+
+[NIP-45](https://nips.be/45) count results.
+When the query results are too large (millions) will trigger a slow query. `setting.data.db_query_timeout`.
+
+#### Search
+
+[NIP-50](https://nips.be/50) Keywords filter. [nostr-db](./db/) implement a simple exact match pattern, case-insensitive, time-sorted full-text search. No performance optimization for multi-word queries, so it's experimental.
+
+It reduces write concurrency and makes space usage significantly larger. So it is suitable for use in private or paid relay.
+
+Now we only index the content of `kind: 1` note event.
 
 ## Usage
 

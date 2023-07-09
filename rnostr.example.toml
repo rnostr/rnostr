@@ -135,9 +135,11 @@ enabled = false
 # kinds = [[0, 10000]]
 
 # NIP-45 Count extension
+# use carefully. see README.md#count
 [count]
 enabled = false
 
 # NIP-50 Search extension
+# use carefully. see README.md#search
 [search]
 enabled = false
