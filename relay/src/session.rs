@@ -31,7 +31,7 @@ pub struct Session {
     /// How often heartbeat pings are sent
     heartbeat_interval: Duration,
 
-    app: web::Data<App>,
+    pub app: web::Data<App>,
 
     /// Simple store for save extension data
     data: HashMap<TypeId, Box<dyn Any>, NoOpHasherDefault>,

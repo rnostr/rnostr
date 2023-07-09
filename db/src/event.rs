@@ -1,6 +1,4 @@
 use crate::error::Error;
-#[cfg(feature = "search")]
-use charabia::Segment;
 use rkyv::{
     vec::ArchivedVec, AlignedVec, Archive, Deserialize as RkyvDeserialize,
     Serialize as RkyvSerialize,
@@ -259,7 +257,7 @@ pub struct Event {
     index: EventIndex,
 
     #[serde(skip)]
-    pub words: Option<Vec<Vec<u8>>>,
+    pub words: Vec<Vec<u8>>,
 }
 
 impl TryFrom<_Event> for Event {
@@ -277,7 +275,7 @@ impl TryFrom<_Event> for Event {
                 &value.tags,
             )?,
             tags: value.tags,
-            words: None,
+            words: Default::default(),
         };
         Ok(event)
     }
@@ -299,7 +297,7 @@ impl Event {
             content,
             sig,
             index,
-            words: None,
+            words: Default::default(),
         };
         Ok(event)
     }
@@ -431,33 +429,21 @@ impl FromEventData for Event {
     }
 }
 
+#[cfg(feature = "search")]
+impl Event {
+    /// build keywords for search ability
+    pub fn build_note_words(&mut self) {
+        if self.kind() == 1 {
+            let mut words = crate::segment(&self.content);
+            self.words.append(&mut words);
+        }
+    }
+}
+
 impl Event {
     /// to json string
     pub fn to_json(&self) -> Result<String, Error> {
         Ok(serde_json::to_string(&self)?)
-    }
-
-    #[cfg(feature = "search")]
-    /// build keywords for search ability
-    pub fn build_words(&mut self) {
-        if self.kind() == 1 {
-            let s: &str = self.content.as_ref();
-            let iter = s.segment_str();
-            let vec = iter
-                .filter_map(|s| {
-                    let bytes = s.as_bytes();
-                    // limit size
-                    if bytes.len() < 255 {
-                        Some(bytes.to_vec())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            if !vec.is_empty() {
-                self.words = Some(vec);
-            }
-        }
     }
 
     pub fn index(&self) -> &EventIndex {

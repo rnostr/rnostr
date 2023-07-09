@@ -1,6 +1,6 @@
 [package]
 name = "nostr-extensions"
-version = "0.1.0"
+version = "0.2.0"
 description = "Nostr relay extensions."
 edition.workspace = true
 license.workspace = true
@@ -11,12 +11,12 @@ authors.workspace = true
 
 [dependencies]
 
-nostr-relay = { version = "0.1.0", path = "../relay" }
+nostr-relay = { version = "0.2.0", path = "../relay" }
 metrics = "0.21.0"
-metrics-exporter-prometheus = { version = "0.12.1", default-features = false, features = [
+metrics-exporter-prometheus = { version = "0.12.1", optional = true, default-features = false, features = [
     "push-gateway",
 ] }
-metrics-util = "0.15.0"
+metrics-util = { version = "0.15.0", optional = true }
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
 uuid = { version = "1.3.4", features = ["v4", "fast-rng"] }
@@ -24,7 +24,14 @@ actix = "0.13.0"
 actix-web = "4.3.1"
 parking_lot = "0.12.1"
 tracing = "0.1.37"
-governor = "0.5.1"
+governor = { version = "0.5.1", optional = true }
+
+[features]
+default = ["metrics", "rate_limiter", "count", "search"]
+search = ["nostr-relay/search"]
+metrics = ["metrics-exporter-prometheus", "metrics-util"]
+rate_limiter = ["governor"]
+count = []
 
 [dev-dependencies]
 actix-rt = "2.8.0"

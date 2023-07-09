@@ -246,11 +246,12 @@ impl Db {
         }
 
         // word
-        if let Some(word) = &event.words {
+        let words = &event.words;
+        if !words.is_empty() {
             let bytes =
-                rkyv::to_bytes::<_, 256>(word).map_err(|e| Error::Serialization(e.to_string()))?;
+                rkyv::to_bytes::<_, 256>(words).map_err(|e| Error::Serialization(e.to_string()))?;
             writer.put(&self.t_uid_word, uid, bytes)?;
-            for item in word {
+            for item in words {
                 writer.put(&self.t_word, IndexKey::encode_word(item, time), uid)?;
             }
         }

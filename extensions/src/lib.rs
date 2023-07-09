@@ -1,8 +1,25 @@
 pub mod auth;
-pub mod metrics;
-pub mod rate_limiter;
+pub use auth::Auth;
 
-pub use {self::metrics::Metrics, auth::Auth, rate_limiter::Ratelimiter};
+#[cfg(feature = "metrics")]
+pub mod metrics;
+#[cfg(feature = "metrics")]
+pub use crate::metrics::Metrics;
+
+#[cfg(feature = "rate_limiter")]
+pub mod rate_limiter;
+#[cfg(feature = "rate_limiter")]
+pub use rate_limiter::Ratelimiter;
+
+#[cfg(feature = "count")]
+pub mod count;
+#[cfg(feature = "count")]
+pub use count::Count;
+
+#[cfg(feature = "search")]
+pub mod search;
+#[cfg(feature = "search")]
+pub use search::Search;
 
 #[cfg(test)]
 pub fn temp_data_path(p: &str) -> anyhow::Result<tempfile::TempDir> {

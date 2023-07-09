@@ -20,7 +20,7 @@ pub struct MyEvent {
 impl MyEvent {
     pub fn into_and_build_words(self) -> Event {
         let mut e: Event = self.into();
-        e.build_words();
+        e.build_note_words();
         e
     }
 }

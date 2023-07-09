@@ -120,7 +120,7 @@ pub fn import<F: Fn(usize)>(
                 match event {
                     Ok(mut event) => {
                         if search {
-                            event.build_words();
+                            event.build_note_words();
                         }
                         Some(event)
                     }

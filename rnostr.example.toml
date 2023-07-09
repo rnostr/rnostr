@@ -133,3 +133,11 @@ enabled = false
 # period = "60s"
 # limit = 5
 # kinds = [[0, 10000]]
+
+# NIP-45 Count extension
+[count]
+enabled = false
+
+# NIP-50 Search extension
+[search]
+enabled = false

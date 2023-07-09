@@ -1,6 +1,4 @@
 use crate::{error::Error, ArchivedEventIndex, EventIndex};
-#[cfg(feature = "search")]
-use charabia::Segment;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::HashMap, ops::Deref, str::FromStr};
@@ -169,11 +167,9 @@ impl Filter {
     /// build keywords for search ability
     pub fn build_words(&mut self) {
         if let Some(search) = &self.search {
-            let s: &str = search.as_ref();
-            let iter = s.segment_str();
-            let vec = iter.map(|s| s.as_bytes().to_vec()).collect::<Vec<_>>();
-            if !vec.is_empty() {
-                self.words = Some(vec);
+            let words = crate::segment(search);
+            if !words.is_empty() {
+                self.words = Some(words);
             }
         }
     }
