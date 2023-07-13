@@ -475,7 +475,10 @@ impl Db {
                 // }
                 let e: Option<Event> = get_event_by_uid(writer, &self.t_data, &self.t_index, &uid)?;
                 if let Some(e) = e {
-                    if event.created_at() < e.created_at() {
+                    // If two events have the same timestamp, the event with the lowest id (first in lexical order) SHOULD be retained, and the other discarded.
+                    if event.created_at() < e.created_at()
+                        || (event.created_at() == e.created_at() && event.id() > e.id())
+                    {
                         return Ok(CheckEventResult::ReplaceIgnored);
                     }
                     // del old
