@@ -27,7 +27,11 @@ impl Extension for Search {
     }
 
     fn setting(&mut self, setting: &SettingWrapper) {
-        self.setting = setting.read().parse_extension(self.name());
+        let mut w = setting.write();
+        self.setting = w.parse_extension(self.name());
+        if self.setting.enabled {
+            w.add_nip(50);
+        }
     }
 
     fn message(
