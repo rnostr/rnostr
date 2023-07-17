@@ -183,10 +183,10 @@ impl App {
 
     pub fn web_server(self) -> Result<actix_server::Server, std::io::Error> {
         let r = self.setting.read();
-        let num = if r.thread.reader == 0 {
+        let num = if r.thread.http == 0 {
             num_cpus::get()
         } else {
-            r.thread.reader
+            r.thread.http
         };
         let host = r.network.host.clone();
         let port = r.network.port;
