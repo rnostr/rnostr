@@ -384,6 +384,21 @@ impl Setting {
         Ok(setting)
     }
 
+    /// read config from env
+    pub fn from_env(env_prefix: String) -> Result<Self> {
+        let mut config = Config::builder();
+        config = config.add_source(
+            Environment::with_prefix(&env_prefix)
+                .prefix_separator("_")
+                .separator("__"),
+        );
+
+        let config = config.build()?;
+        let mut setting: Setting = config.try_deserialize()?;
+        setting.correct();
+        Ok(setting)
+    }
+
     /// config from str
     pub fn from_str(s: &str, format: FileFormat) -> Result<Self> {
         let builder = Config::builder();

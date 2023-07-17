@@ -107,16 +107,29 @@ impl App {
     ) -> Result<Self> {
         let extensions = Arc::new(RwLock::new(Extensions::default()));
         let c_extensions = Arc::clone(&extensions);
+        let env_notice = setting_env_prefix
+            .as_ref()
+            .map(|s| {
+                format!(
+                    ", config will be overrided by ENV seting with prefix `{}_`",
+                    s
+                )
+            })
+            .unwrap_or_default();
+
         let setting = if watch && setting_path.is_some() {
             let path = setting_path.as_ref().unwrap().as_ref();
-            info!("Watch config {:?}", path);
+            info!("Watch config file {:?}{}", path, env_notice);
             SettingWrapper::watch(path, setting_env_prefix, move |s| {
                 let mut w = c_extensions.write();
                 w.call_setting(s);
             })?
         } else if let Some(path) = setting_path {
-            info!("Load config {:?}", path.as_ref());
+            info!("Load config {:?}{}", path.as_ref(), env_notice);
             Setting::read(path.as_ref(), setting_env_prefix)?.into()
+        } else if let Some(prefix) = setting_env_prefix {
+            info!("Load default config{}", env_notice);
+            Setting::from_env(prefix)?.into()
         } else {
             info!("Load default config");
             Setting::default().into()
