@@ -75,27 +75,53 @@ impl<I, K> DerefMut for SortedKeyList<I, K> {
     }
 }
 
-type GroupItem<K, E> = Result<K, E>;
+pub trait GroupItem<'txn, K, E>: Iterator<Item = Result<K, E>> {
+    /// Set the watcher for watching number of scans, stop scanning
+    fn watcher(&mut self, watcher: ScannerWatcherType<E>);
+    /// get the current `next` scan times
+    fn cur_times(&self) -> u64;
+}
+
 /// Query in a group of scanners in a given time sequence.
 /// Get the scanners intersection if and.
-type ShortItemType = usize;
+type SortItemType = usize;
+type GroupItemType<'txn, K, E> = Box<dyn GroupItem<'txn, K, E> + 'txn>;
 
-type ScannerWatcher<E> = Box<dyn FnMut(u64) -> Result<(), E>>;
+// https://stackoverflow.com/questions/65203307/how-do-i-create-a-trait-object-that-implements-fn-and-can-be-cloned-to-distinct
+// https://github.com/dtolnay/dyn-clone
+type ScannerWatcherType<E> = Box<dyn ScannerWatcher<E>>;
+//FnMut(u64) -> Result<(), E>
+pub trait ScannerWatcher<E>: FnMut(u64) -> Result<(), E> {
+    fn clone_box(&self) -> Box<dyn ScannerWatcher<E>>;
+}
+
+impl<E, F: FnMut(u64) -> Result<(), E> + Clone + 'static> ScannerWatcher<E> for F {
+    fn clone_box(&self) -> Box<dyn ScannerWatcher<E>> {
+        Box::new(self.clone())
+    }
+}
+
+impl<E> Clone for Box<dyn ScannerWatcher<E>> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
 
 pub struct Group<'txn, K, E>
 where
     K: TimeKey,
     E: From<Error>,
 {
-    onlyone: Option<Scanner<'txn, K, E>>,
-    scanners: Vec<Scanner<'txn, K, E>>,
-    founds: SortedKeyList<ShortItemType, K>,
-    pub scan_index: u64,
+    onlyone: Option<GroupItemType<'txn, K, E>>,
+    items: Vec<GroupItemType<'txn, K, E>>,
+    founds: SortedKeyList<SortItemType, K>,
+    pub scan_times: u64,
+    cur_times: u64,
     and: bool,
     done: bool,
     // one id has more than one key
     dup: bool,
-    watcher: Option<ScannerWatcher<E>>,
+    watcher: Option<ScannerWatcherType<E>>,
 }
 
 impl<'txn, K, E> Group<'txn, K, E>
@@ -106,9 +132,10 @@ where
     pub fn new(reverse: bool, and: bool, dup: bool) -> Self {
         Self {
             onlyone: None,
-            scanners: Vec::new(),
+            items: Vec::new(),
             founds: SortedKeyList::new(reverse),
-            scan_index: 0,
+            scan_times: 0,
+            cur_times: 0,
             and,
             done: false,
             dup,
@@ -116,24 +143,21 @@ where
         }
     }
 
-    /// Set the watcher for watching number of scans, stop scanning
-    pub fn watcher(&mut self, watcher: ScannerWatcher<E>) {
-        self.watcher = Some(watcher);
-    }
-
-    fn watch(&mut self) -> Result<(), E> {
+    fn watch(&mut self, add_count: u64) -> Result<(), E> {
+        self.scan_times += add_count;
+        self.cur_times += add_count;
         if let Some(watcher) = &mut self.watcher {
-            watcher(self.scan_index)?;
+            watcher(self.scan_times)?;
         }
         Ok(())
     }
 
-    pub fn add(&mut self, scanner: Scanner<'txn, K, E>) -> Result<(), E> {
+    pub fn add(&mut self, scanner: GroupItemType<'txn, K, E>) -> Result<(), E> {
         if self.done {
             return Ok(());
         }
         // only one
-        if self.scanners.is_empty() && self.onlyone.is_none() {
+        if self.items.is_empty() && self.onlyone.is_none() {
             self.onlyone = Some(scanner);
         } else {
             if self.onlyone.is_some() {
@@ -145,15 +169,16 @@ where
         Ok(())
     }
 
-    fn add_to_list(&mut self, mut scanner: Scanner<'txn, K, E>) -> Result<(), E> {
+    fn add_to_list(&mut self, mut scanner: GroupItemType<'txn, K, E>) -> Result<(), E> {
         if self.done {
             return Ok(());
         }
 
-        let key = self.scanners.len();
+        let key = self.items.len();
 
         let item = scanner.next();
-        self.scan_index += scanner.cur_times;
+        self.scan_times += scanner.cur_times();
+        self.cur_times += scanner.cur_times();
 
         // get the first
         if let Some(item) = item {
@@ -164,7 +189,7 @@ where
             return Ok(());
         }
 
-        self.scanners.push(scanner);
+        self.items.push(scanner);
 
         Ok(())
     }
@@ -179,10 +204,10 @@ where
             for i in (0..len).rev() {
                 let item = &self.founds[i];
                 if item.1.cmp(key).is_ne() {
-                    let scanner = self.scanners.get_mut(cur.0).unwrap();
+                    let scanner = self.items.get_mut(cur.0).unwrap();
                     let item = scanner.next();
-                    self.scan_index += scanner.cur_times;
-                    self.watch()?;
+                    let count = scanner.cur_times();
+                    self.watch(count)?;
 
                     if let Some(item) = item {
                         self.founds.add(cur.0, item?);
@@ -196,10 +221,10 @@ where
             }
 
             // scan next
-            let scanner = self.scanners.get_mut(cur.0).unwrap();
+            let scanner = self.items.get_mut(cur.0).unwrap();
             let item = scanner.next();
-            self.scan_index += scanner.cur_times;
-            self.watch()?;
+            let count = scanner.cur_times();
+            self.watch(count)?;
             if let Some(item) = item {
                 self.founds.add(cur.0, item?);
             } else {
@@ -231,10 +256,10 @@ where
 
             // scan dup next
             for cur in curs {
-                let scanner = self.scanners.get_mut(cur.0).unwrap();
+                let scanner = self.items.get_mut(cur.0).unwrap();
                 let item = scanner.next();
-                self.scan_index += scanner.cur_times;
-                self.watch()?;
+                let count = scanner.cur_times();
+                self.watch(count)?;
                 if let Some(item) = item {
                     self.founds.add(cur.0, item?);
                 }
@@ -244,10 +269,10 @@ where
         }
 
         // next
-        let scanner = self.scanners.get_mut(cur.0).unwrap();
+        let scanner = self.items.get_mut(cur.0).unwrap();
         let item = scanner.next();
-        self.scan_index += scanner.cur_times;
-        self.watch()?;
+        let count = scanner.cur_times();
+        self.watch(count)?;
         if let Some(item) = item {
             self.founds.add(cur.0, item?);
         }
@@ -261,12 +286,13 @@ where
     K: TimeKey,
     E: From<Error>,
 {
-    type Item = GroupItem<K, E>;
+    type Item = Result<K, E>;
     fn next(&mut self) -> Option<Self::Item> {
+        self.cur_times = 0;
         if let Some(scanner) = &mut self.onlyone {
             let item = scanner.next();
-            self.scan_index += scanner.cur_times;
-            if let Err(err) = self.watch() {
+            let count = scanner.cur_times();
+            if let Err(err) = self.watch(count) {
                 Some(Err(err))
             } else {
                 item
@@ -284,22 +310,39 @@ where
     }
 }
 
-pub enum GroupType<'txn, K, E>
-where
-    K: TimeKey,
-    E: From<Error>,
-{
-    One(Scanner<'txn, K, E>),
-    // scanners,
-    // sortedlist,
-    // dup: one id has more than one key
-    Or(
-        Vec<Scanner<'txn, K, E>>,
-        SortedKeyList<ShortItemType, K>,
-        bool,
-    ),
-    And(Vec<Scanner<'txn, K, E>>, SortedKeyList<ShortItemType, K>),
+impl<'txn, K: TimeKey, E: From<Error>> GroupItem<'txn, K, E> for Group<'txn, K, E> {
+    /// Set the watcher for watching number of scans, stop scanning
+    fn watcher(&mut self, watcher: ScannerWatcherType<E>) {
+        self.watcher = Some(watcher.clone());
+        if let Some(scanner) = &mut self.onlyone {
+            scanner.watcher(watcher.clone());
+        }
+        for item in &mut self.items {
+            item.watcher(watcher.clone());
+        }
+    }
+
+    fn cur_times(&self) -> u64 {
+        self.cur_times
+    }
 }
+
+// pub enum GroupType<'txn, K, E>
+// where
+//     K: TimeKey,
+//     E: From<Error>,
+// {
+//     One(Scanner<'txn, K, E>),
+//     // scanners,
+//     // sortedlist,
+//     // dup: one id has more than one key
+//     Or(
+//         Vec<Scanner<'txn, K, E>>,
+//         SortedKeyList<ShortItemType, K>,
+//         bool,
+//     ),
+//     And(Vec<Scanner<'txn, K, E>>, SortedKeyList<ShortItemType, K>),
+// }
 
 type ScannerMatcher<'txn, K, E> =
     Box<dyn Fn(&Scanner<K, E>, (&'txn [u8], &'txn [u8])) -> Result<MatchResult<K>, E>>;
@@ -438,6 +481,16 @@ where
     type Item = Result<K, E>;
     fn next(&mut self) -> Option<Self::Item> {
         self.next_inner().transpose()
+    }
+}
+
+impl<'txn, K: TimeKey, E: From<Error>> GroupItem<'txn, K, E> for Scanner<'txn, K, E> {
+    fn watcher(&mut self, _watcher: ScannerWatcherType<E>) {
+        // ignore
+    }
+
+    fn cur_times(&self) -> u64 {
+        self.cur_times
     }
 }
 

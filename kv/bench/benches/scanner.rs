@@ -179,7 +179,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                     None,
                     Box::new(|s, (k, v)| Ok(MatchResult::Found(Key::from(k, v)))),
                 );
-                group.add(scanner).unwrap();
+                group.add(Box::new(scanner)).unwrap();
                 let mut total = 0;
                 while let Some(kv) = group.next() {
                     let kv = kv.unwrap();
@@ -216,7 +216,7 @@ fn bench_scanner(c: &mut Criterion, init_len: usize, chunk_size: usize) {
                             }
                         }),
                     );
-                    group.add(scanner).unwrap();
+                    group.add(Box::new(scanner)).unwrap();
                 });
 
                 let mut total = 0;

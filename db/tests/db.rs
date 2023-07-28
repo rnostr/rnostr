@@ -856,7 +856,10 @@ pub fn test_query_tag() -> Result<()> {
                 kind: i as u64,
                 content: "author 2 kind".to_owned(),
                 created_at: i as u64 * 1000,
-                tags: vec![vec!["t".to_owned(), "query tag1".to_owned()]],
+                tags: vec![
+                    vec!["t".to_owned(), "query tag1".to_owned()],
+                    vec!["k".to_owned(), i.to_string()],
+                ],
                 ..Default::default()
             }
             .into()
@@ -931,6 +934,23 @@ pub fn test_query_tag() -> Result<()> {
     };
     let e1 = all(&db, &filter)?;
     assert_eq!(e1.0.len(), 0);
+
+    // let filter = Filter {
+    //     tags: HashMap::from([
+    //         (
+    //             "t".to_string().into_bytes(),
+    //             vec!["query tag1".to_string().into_bytes()].into(),
+    //         ),
+    //         (
+    //             "k".to_string().into_bytes(),
+    //             vec![1.to_string().into_bytes()].into(),
+    //         ),
+    //     ]),
+    //     desc: true,
+    //     ..Default::default()
+    // };
+    // let e1 = all(&db, &filter)?;
+    // assert_eq!(e1.0.len(), 1);
     Ok(())
 }
 

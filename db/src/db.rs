@@ -5,7 +5,7 @@ use crate::{
 };
 use nostr_kv::{
     lmdb::{Db as Lmdb, Iter as LmdbIter, *},
-    scanner::{Group, MatchResult, Scanner},
+    scanner::{Group, GroupItem, MatchResult, Scanner},
 };
 
 use std::{
@@ -742,7 +742,7 @@ where
             filter.until,
             Box::new(|_, r| Ok(MatchResult::Found(IndexKey::from(r.0, r.1)?))),
         );
-        group.add(scanner)?;
+        group.add(Box::new(scanner))?;
         Self::new(kv_db, reader, filter, group, match_index)
     }
 
@@ -773,7 +773,7 @@ where
                     })
                 }),
             );
-            group.add(scanner)?;
+            group.add(Box::new(scanner))?;
         }
         Self::new(kv_db, reader, filter, group, match_index)
     }
@@ -822,7 +822,7 @@ where
                         })
                     }),
                 );
-                group.add(scanner)?;
+                group.add(Box::new(scanner))?;
             }
         }
         Self::new(kv_db, reader, filter, group, match_index)
@@ -874,7 +874,7 @@ where
                             })
                         }),
                     );
-                    group.add(scanner)?;
+                    group.add(Box::new(scanner))?;
                 }
             } else {
                 let clone_kinds = kinds.clone();
@@ -908,7 +908,7 @@ where
                         })
                     }),
                 );
-                group.add(scanner)?;
+                group.add(Box::new(scanner))?;
             }
         }
 
@@ -960,7 +960,7 @@ where
                     })
                 }),
             );
-            group.add(scanner)?;
+            group.add(Box::new(scanner))?;
         }
         Self::new(kv_db, reader, filter, group, match_index)
     }
@@ -994,7 +994,7 @@ where
                         })
                     }),
                 );
-                group.add(scanner)?;
+                group.add(Box::new(scanner))?;
             }
         }
         Self::new(kv_db, reader, filter, group, match_index)
@@ -1072,7 +1072,7 @@ where
     /// The stats after scan
     pub fn stats(&self) -> Stats {
         Stats {
-            scan_index: self.group.scan_index,
+            scan_index: self.group.scan_times,
             get_data: self.get_data,
             get_index: self.get_index,
         }
@@ -1107,7 +1107,7 @@ where
             Stats {
                 get_data: 0,
                 get_index: self.get_index,
-                scan_index: self.group.scan_index,
+                scan_index: self.group.scan_times,
             },
         ))
     }

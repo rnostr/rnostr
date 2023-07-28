@@ -123,7 +123,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(scanner)?;
+        group.add(Box::new(scanner))?;
     }
 
     let k = group.next().unwrap()?;
@@ -162,7 +162,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(scanner)?;
+        group.add(Box::new(scanner))?;
     }
 
     let k = group.next().unwrap()?;
@@ -196,7 +196,7 @@ pub fn test_scanner() -> Result<()> {
                 })
             }),
         );
-        group.add(scanner)?;
+        group.add(Box::new(scanner))?;
     }
 
     let res = group.try_for_each(|k| k.map(|_k| ()));
