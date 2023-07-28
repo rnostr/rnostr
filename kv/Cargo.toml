@@ -1,11 +1,9 @@
 [package]
 name = "nostr-kv"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lmdb api for nostr-db"
 keywords = ["lmdb"]
-exclude = [
-    ".gitignore",
-]
+exclude = [".gitignore"]
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true

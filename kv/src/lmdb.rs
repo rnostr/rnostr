@@ -476,7 +476,7 @@ impl<'txn> Iter<'txn> {
                         self.op = ffi::MDB_GET_CURRENT;
                         match inner.get_by_key(start.as_ref(), ffi::MDB_SET_RANGE) {
                             Ok(Some((key, _))) => {
-                                if key.deref() >= start.as_ref() {
+                                if key >= start.as_ref() {
                                     if self.dup {
                                         self.op = ffi::MDB_PREV_NODUP;
                                     } else {
@@ -512,7 +512,7 @@ impl<'txn> Iter<'txn> {
                         self.op = ffi::MDB_GET_CURRENT;
                         match inner.get_by_key(start.as_ref(), ffi::MDB_SET_RANGE) {
                             Ok(Some((key, _))) => {
-                                if start.as_ref() == key.deref() {
+                                if start.as_ref() == key {
                                     if self.dup {
                                         self.op = ffi::MDB_NEXT_NODUP;
                                     } else {

@@ -935,22 +935,22 @@ pub fn test_query_tag() -> Result<()> {
     let e1 = all(&db, &filter)?;
     assert_eq!(e1.0.len(), 0);
 
-    // let filter = Filter {
-    //     tags: HashMap::from([
-    //         (
-    //             "t".to_string().into_bytes(),
-    //             vec!["query tag1".to_string().into_bytes()].into(),
-    //         ),
-    //         (
-    //             "k".to_string().into_bytes(),
-    //             vec![1.to_string().into_bytes()].into(),
-    //         ),
-    //     ]),
-    //     desc: true,
-    //     ..Default::default()
-    // };
-    // let e1 = all(&db, &filter)?;
-    // assert_eq!(e1.0.len(), 1);
+    let filter = Filter {
+        tags: HashMap::from([
+            (
+                "t".to_string().into_bytes(),
+                vec!["query tag1".to_string().into_bytes()].into(),
+            ),
+            (
+                "k".to_string().into_bytes(),
+                vec![1.to_string().into_bytes()].into(),
+            ),
+        ]),
+        desc: true,
+        ..Default::default()
+    };
+    let e1 = all(&db, &filter)?;
+    assert_eq!(e1.0.len(), 1);
     Ok(())
 }
 

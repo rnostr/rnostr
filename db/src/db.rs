@@ -785,10 +785,11 @@ where
         view: &Tree,
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
-        let mut group = Group::new(filter.desc, false, true);
+        let mut group = Group::new(filter.desc, true, false);
         let has_kind = filter.kinds.is_some();
 
         for tag in filter.tags.iter() {
+            let mut sub = Group::new(filter.desc, false, true);
             for key in tag.1.iter() {
                 let kinds = filter.kinds.clone();
                 // need add separator to the end, otherwise other tags will intrude
@@ -822,8 +823,9 @@ where
                         })
                     }),
                 );
-                group.add(Box::new(scanner))?;
+                sub.add(Box::new(scanner))?;
             }
+            group.add(Box::new(sub))?;
         }
         Self::new(kv_db, reader, filter, group, match_index)
     }
