@@ -100,19 +100,22 @@ cargo build --release
 # Create data dir
 mkdir ./data
 
-# Build
-docker build . -t rnostr/rnostr
-
-# Build in China need to configure the mirror.
-docker build . -t rnostr/rnostr --build-arg BASE=mirror_cn
-
-# Run
-
 docker run -it --rm -p 8080:8080 \
   --user=$(id -u) \
   -v $(pwd)/data:/rnostr/data \
   -v $(pwd)/config:/rnostr/config \
   --name rnostr rnostr/rnostr:latest
+
+```
+
+Build by self
+
+```shell
+
+docker build . -t rnostr/rnostr
+
+# Build in China need to configure the mirror.
+docker build . -t rnostr/rnostr --build-arg BASE=mirror_cn
 
 ```
 

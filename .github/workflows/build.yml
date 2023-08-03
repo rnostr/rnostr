@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  push:
+    branches: 
+      - main
+      - dev
+  pull_request:
+    branches: 
+      - main
+      - dev
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  default:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - run: cargo check --workspace --all-targets --all-features
+
+  projects:
+    name: Projects
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        args:
+          [
+            -p nostr-kv,
+            -p nostr-db --no-default-features,
+            -p nostr-db --features search,
+            -p nostr-db --features zstd,
+            -p nostr-relay,
+            -p nostr-extensions,
+          ]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - run: cargo check ${{ matrix.args }}
+
+  platforms:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#choosing-github-hosted-runners
+      matrix:
+        os: 
+          - macos-13
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - run: cargo check --workspace --all-targets --all-features
+
+  toolchains:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: 
+          - stable
+          - 1.67.0
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - run: cargo check --workspace --all-targets --all-features
