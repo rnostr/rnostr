@@ -13,7 +13,7 @@ use tracing::info;
 
 pub mod route {
     use crate::{App, Session};
-    use actix_http::header::{ACCEPT, LOCATION, UPGRADE};
+    use actix_web::http::header::{ACCEPT, LOCATION, UPGRADE};
     use actix_web::{web, Error, HttpRequest, HttpResponse};
     use actix_web_actors::ws;
 
@@ -181,7 +181,7 @@ impl App {
         create_web_app(web::Data::new(self))
     }
 
-    pub fn web_server(self) -> Result<actix_server::Server, std::io::Error> {
+    pub fn web_server(self) -> Result<actix_web::dev::Server, std::io::Error> {
         let r = self.setting.read();
         let num = if r.thread.http == 0 {
             num_cpus::get()
@@ -255,7 +255,9 @@ pub mod tests {
         let res = app.call(req).await.unwrap();
         assert_eq!(res.status(), 200);
         assert_eq!(
-            res.headers().get(actix_http::header::CONTENT_TYPE).unwrap(),
+            res.headers()
+                .get(actix_web::http::header::CONTENT_TYPE)
+                .unwrap(),
             "application/nostr+json"
         );
         let result = read_body(res).await;
