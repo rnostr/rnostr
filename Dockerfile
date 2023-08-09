@@ -82,6 +82,9 @@ COPY --from=builder --chown=${USER}:${USER} \
 COPY --from=builder --chown=${USER}:${USER} \
         "${SRC_DIR}/rnostr.example.toml" "${CONF_DIR}/rnostr.toml"
 
+# Change default bind address to 0.0.0.0
+ENV RNOSTR_NETWORK__HOST=0.0.0.0
+
 WORKDIR "${HOME_DIR}"
 
 USER ${USER}
