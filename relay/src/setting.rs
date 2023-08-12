@@ -305,20 +305,12 @@ impl Setting {
         self.ext_limitation.insert(key, value);
     }
 
-    /// get extension setting as json from extra
-    pub fn get_extra_json(&self, key: &str) -> Option<String> {
+    /// Parse extension setting.
+    pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
         self.extra
             .get(key)
-            .and_then(|h| serde_json::to_string(h).ok())
-        // .map(|h| serde_json::to_string(h).ok())
-        // .flatten()
-    }
-
-    /// Parse extension setting from extra json string.
-    pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
-        self.get_extra_json(key)
-            .and_then(|s| {
-                let r = serde_json::from_str::<T>(&s);
+            .and_then(|v| {
+                let r = serde_json::from_value::<T>(v.clone());
                 if let Err(err) = &r {
                     error!(error = err.to_string(), "failed to parse {:?} setting", key);
                 }
