@@ -3,7 +3,7 @@ use nostr_relay::db::now;
 use nostr_relay::{
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
     setting::SettingWrapper,
-    Extension, ExtensionMessageResult, Session,
+    Extension, ExtensionMessageResult, List, Session,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -11,12 +11,12 @@ use uuid::Uuid;
 #[derive(Deserialize, Default, Debug)]
 #[serde(default)]
 pub struct Permission {
-    pub ip_whitelist: Option<Vec<String>>,
-    pub pubkey_whitelist: Option<Vec<String>>,
-    pub ip_blacklist: Option<Vec<String>>,
-    pub pubkey_blacklist: Option<Vec<String>>,
-    pub event_pubkey_whitelist: Option<Vec<String>>,
-    pub event_pubkey_blacklist: Option<Vec<String>>,
+    pub ip_whitelist: Option<List>,
+    pub pubkey_whitelist: Option<List>,
+    pub ip_blacklist: Option<List>,
+    pub pubkey_blacklist: Option<List>,
+    pub event_pubkey_whitelist: Option<List>,
+    pub event_pubkey_blacklist: Option<List>,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -226,7 +226,7 @@ mod tests {
     fn verify() -> Result<()> {
         assert!(Auth::verify_permission(
             Some(&Permission {
-                ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
+                ip_whitelist: Some(vec!["127.0.0.1".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -236,7 +236,7 @@ mod tests {
         .is_ok());
         assert!(Auth::verify_permission(
             Some(&Permission {
-                ip_whitelist: Some(vec!["127.0.0.1".to_string()]),
+                ip_whitelist: Some(vec!["127.0.0.1".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -247,7 +247,7 @@ mod tests {
 
         assert!(Auth::verify_permission(
             Some(&Permission {
-                ip_blacklist: Some(vec!["127.0.0.1".to_string()]),
+                ip_blacklist: Some(vec!["127.0.0.1".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -257,7 +257,7 @@ mod tests {
         .is_err());
         assert!(Auth::verify_permission(
             Some(&Permission {
-                ip_blacklist: Some(vec!["127.0.0.1".to_string()]),
+                ip_blacklist: Some(vec!["127.0.0.1".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -268,7 +268,7 @@ mod tests {
 
         assert!(Auth::verify_permission(
             Some(&Permission {
-                pubkey_whitelist: Some(vec!["xx".to_string()]),
+                pubkey_whitelist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             Some(&"xx".to_owned()),
@@ -278,7 +278,7 @@ mod tests {
         .is_ok());
         assert!(Auth::verify_permission(
             Some(&Permission {
-                pubkey_whitelist: Some(vec!["xx".to_string()]),
+                pubkey_whitelist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             Some(&"xxxx".to_owned()),
@@ -289,7 +289,7 @@ mod tests {
 
         assert!(Auth::verify_permission(
             Some(&Permission {
-                pubkey_blacklist: Some(vec!["xx".to_string()]),
+                pubkey_blacklist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             Some(&"xx".to_owned()),
@@ -299,7 +299,7 @@ mod tests {
         .is_err());
         assert!(Auth::verify_permission(
             Some(&Permission {
-                pubkey_blacklist: Some(vec!["xx".to_string()]),
+                pubkey_blacklist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             Some(&"xxxx".to_owned()),
@@ -310,7 +310,7 @@ mod tests {
 
         assert!(Auth::verify_permission(
             Some(&Permission {
-                event_pubkey_whitelist: Some(vec!["xx".to_string()]),
+                event_pubkey_whitelist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -320,7 +320,7 @@ mod tests {
         .is_ok());
         assert!(Auth::verify_permission(
             Some(&Permission {
-                event_pubkey_whitelist: Some(vec!["xx".to_string()]),
+                event_pubkey_whitelist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -331,7 +331,7 @@ mod tests {
 
         assert!(Auth::verify_permission(
             Some(&Permission {
-                event_pubkey_blacklist: Some(vec!["xx".to_string()]),
+                event_pubkey_blacklist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             None,
@@ -341,7 +341,7 @@ mod tests {
         .is_err());
         assert!(Auth::verify_permission(
             Some(&Permission {
-                event_pubkey_blacklist: Some(vec!["xx".to_string()]),
+                event_pubkey_blacklist: Some(vec!["xx".to_string()].into()),
                 ..Default::default()
             }),
             None,

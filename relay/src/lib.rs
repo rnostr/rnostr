@@ -26,6 +26,7 @@ mod app;
 pub mod duration;
 mod extension;
 mod hash;
+mod list;
 pub mod message;
 mod reader;
 mod server;
@@ -37,7 +38,7 @@ mod writer;
 pub use metrics;
 pub use nostr_db as db;
 pub use {
-    app::*, extension::*, reader::Reader, server::Server, server::*, session::Session,
+    app::*, extension::*, list::List, reader::Reader, server::Server, server::*, session::Session,
     setting::Setting, subscriber::Subscriber, writer::Writer,
 };
 
