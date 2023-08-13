@@ -26,10 +26,13 @@ pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
 
     actix_rt::System::new().block_on(async {
         let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None).unwrap();
+        let db = app_data.db.clone();
         app_data
             .add_extension(nostr_extensions::Metrics::new())
             .add_extension(nostr_extensions::Auth::new())
             .add_extension(nostr_extensions::Ratelimiter::new())
+            .add_extension(nostr_extensions::Count::new(db))
+            .add_extension(nostr_extensions::Search::new())
             .web_server()
             .unwrap()
             .await
