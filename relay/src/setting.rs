@@ -363,11 +363,7 @@ impl Setting {
             // override with file contents
             .add_source(File::with_name(file.as_ref().to_str().unwrap()));
         if let Some(prefix) = env_prefix {
-            config = config.add_source(
-                Environment::with_prefix(&prefix)
-                    .prefix_separator("_")
-                    .separator("__"),
-            );
+            config = config.add_source(Self::env_source(&prefix));
         }
 
         let config = config.build()?;
@@ -376,15 +372,19 @@ impl Setting {
         Ok(setting)
     }
 
+    fn env_source(prefix: &str) -> Environment {
+        Environment::with_prefix(prefix)
+            .try_parsing(true)
+            .prefix_separator("_")
+            .separator("__")
+        // .list_separator(" ")
+        // .with_list_parse_key("")
+    }
+
     /// read config from env
     pub fn from_env(env_prefix: String) -> Result<Self> {
         let mut config = Config::builder();
-        config = config.add_source(
-            Environment::with_prefix(&env_prefix)
-                .prefix_separator("_")
-                .separator("__"),
-        );
-
+        config = config.add_source(Self::env_source(&env_prefix));
         let config = config.build()?;
         let mut setting: Setting = config.try_deserialize()?;
         setting.correct();
