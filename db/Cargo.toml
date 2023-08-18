@@ -11,7 +11,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-nostr-kv = { version = "0.3.0", path = "../kv" }
+nostr-kv = { version = "0.4.0", path = "../kv" }
 thiserror = "1.0.40"
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.160", features = ["derive"] }

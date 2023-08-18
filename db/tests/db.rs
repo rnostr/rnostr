@@ -788,6 +788,14 @@ pub fn test_query_created_at() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
+        since: Some(2_000_000),
+        desc: false,
+        ..Default::default()
+    };
+    let e1 = all(&db, &filter)?;
+    assert_eq!(e1.0.len(), 0);
+
+    let filter = Filter {
         since: Some(1_000_000),
         desc: false,
         ..Default::default()
@@ -818,6 +826,41 @@ pub fn test_query_created_at() -> Result<()> {
     assert_eq!(e1.0[0].created_at(), 1_000_005);
     assert_eq!(e1.0[5].created_at(), 1_000_000);
 
+    Ok(())
+}
+
+#[test]
+pub fn test_query_real_time() -> Result<()> {
+    let db = create_db("test_query_real_time")?;
+    let events: Vec<Event> = vec![
+        MyEvent {
+            id: id(20, 0),
+            pubkey: author(20),
+            kind: 1,
+            content: "time".to_owned(),
+            created_at: 1688479232,
+            ..Default::default()
+        }
+        .into(),
+        MyEvent {
+            id: id(20, 1),
+            pubkey: author(20),
+            kind: 1,
+            content: "time".to_owned(),
+            created_at: 1691570719,
+            ..Default::default()
+        }
+        .into(),
+    ];
+    db.batch_put(events)?;
+
+    let filter = Filter {
+        since: Some(1692290847),
+        desc: false,
+        ..Default::default()
+    };
+    let e1 = all(&db, &filter)?;
+    assert_eq!(e1.0.len(), 0);
     Ok(())
 }
 

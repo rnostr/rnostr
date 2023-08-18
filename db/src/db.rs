@@ -346,12 +346,16 @@ impl Db {
         let inner = Lmdb::open_with(path, Some(20), Some(100), Some(1_000_000_000_000), 0)?;
 
         let default_opts = 0;
-        let integer_default_opts = ffi::MDB_INTEGERKEY;
+        // let integer_default_opts = ffi::MDB_INTEGERKEY;
+        let integer_default_opts = 0;
 
-        let index_opts = ffi::MDB_DUPSORT | ffi::MDB_DUPFIXED | ffi::MDB_INTEGERDUP;
+        // let index_opts = ffi::MDB_DUPSORT | ffi::MDB_DUPFIXED | ffi::MDB_INTEGERDUP;
+        let index_opts = ffi::MDB_DUPSORT | ffi::MDB_DUPFIXED;
 
-        let integer_index_opts =
-            ffi::MDB_DUPSORT | ffi::MDB_INTEGERKEY | ffi::MDB_DUPFIXED | ffi::MDB_INTEGERDUP;
+        // let integer_index_opts =
+        // ffi::MDB_DUPSORT | ffi::MDB_INTEGERKEY | ffi::MDB_DUPFIXED | ffi::MDB_INTEGERDUP;
+        // lmdb interger needs check byte order. little-endian
+        let integer_index_opts = ffi::MDB_DUPSORT | ffi::MDB_DUPFIXED;
 
         let t_data = inner.open_tree(Some("t_data"), integer_default_opts)?;
         let t_meta = inner.open_tree(Some("t_meta"), default_opts)?;
