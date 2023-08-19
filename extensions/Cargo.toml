@@ -1,6 +1,6 @@
 [package]
 name = "nostr-extensions"
-version = "0.4.0"
+version = "0.4.1"
 description = "Nostr relay extensions."
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ authors.workspace = true
 
 [dependencies]
 
-nostr-relay = { version = "0.4.0", path = "../relay" }
+nostr-relay = { version = "0.4.1", path = "../relay" }
 metrics = "0.21.0"
 metrics-exporter-prometheus = { version = "0.12.1", optional = true, default-features = false, features = [
     "push-gateway",

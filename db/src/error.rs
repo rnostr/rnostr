@@ -26,4 +26,11 @@ pub enum Error {
     Message(String),
     #[error("Scan timeout")]
     ScanTimeout,
+    #[error("The database schema has been modified. Please run export first, move the old database file, then import and start the program.
+      Find the rnostr command at https://github.com/rnostr/rnostr#commands
+      rnostr export data/events > events.json
+      mv data/events data/old_events
+      rnostr import data/events events.json
+    ")]
+    VersionMismatch,
 }

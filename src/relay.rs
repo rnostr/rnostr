@@ -20,25 +20,25 @@ pub struct RelayOpts {
     pub watch: bool,
 }
 
-pub fn relay(config: &PathBuf, watch: bool) -> Result<()> {
+#[actix_rt::main]
+pub async fn relay(config: &PathBuf, watch: bool) -> Result<()> {
     tracing_subscriber::fmt::init();
     info!("Start relay server");
 
-    actix_rt::System::new().block_on(async {
-        let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None).unwrap();
-        let db = app_data.db.clone();
-        app_data
-            .add_extension(nostr_extensions::Metrics::new())
-            .add_extension(nostr_extensions::Auth::new())
-            .add_extension(nostr_extensions::Ratelimiter::new())
-            .add_extension(nostr_extensions::Count::new(db))
-            .add_extension(nostr_extensions::Search::new())
-            .web_server()
-            .unwrap()
-            .await
-            .unwrap();
-        info!("Relay server shutdown");
-    });
+    // actix_rt::System::new().block_on(async {
+    // });
+
+    let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None)?;
+    let db = app_data.db.clone();
+    app_data
+        .add_extension(nostr_extensions::Metrics::new())
+        .add_extension(nostr_extensions::Auth::new())
+        .add_extension(nostr_extensions::Ratelimiter::new())
+        .add_extension(nostr_extensions::Count::new(db))
+        .add_extension(nostr_extensions::Search::new())
+        .web_server()?
+        .await?;
+    info!("Relay server shutdown");
 
     Ok(())
 }

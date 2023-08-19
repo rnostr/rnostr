@@ -32,6 +32,7 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 }
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
+const DB_VERSION: &str = "2";
 
 #[derive(Clone)]
 pub struct Db {
@@ -342,6 +343,21 @@ impl Db {
         Ok(())
     }
 
+    /// check db version, return [`Error::VersionMismatch`] when db schema changed
+    pub fn check_schema(&self) -> Result<()> {
+        let mut writer = self.inner.writer()?;
+        let old = writer.get(&self.t_meta, "version")?;
+        if let Some(old) = old {
+            if old != DB_VERSION.as_bytes() {
+                return Err(Error::VersionMismatch);
+            }
+        } else {
+            writer.put(&self.t_meta, "version", DB_VERSION)?;
+        }
+        writer.commit()?;
+        Ok(())
+    }
+
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let inner = Lmdb::open_with(path, Some(20), Some(100), Some(1_000_000_000_000), 0)?;
 
@@ -359,12 +375,6 @@ impl Db {
 
         let t_data = inner.open_tree(Some("t_data"), integer_default_opts)?;
         let t_meta = inner.open_tree(Some("t_meta"), default_opts)?;
-        {
-            // initialize db version
-            let mut writer = inner.writer()?;
-            writer.put(&t_meta, "version", "1")?;
-            writer.commit()?;
-        }
 
         Ok(Self {
             seq: Arc::new(AtomicU64::new(latest_seq(&inner, &t_data)?)),

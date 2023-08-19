@@ -107,6 +107,7 @@ pub fn import<F: Fn(usize)>(
     f: F,
 ) -> Result<usize> {
     let db = Db::open(path)?;
+    db.check_schema()?;
     let reader = BufReader::new(input);
     let lines = reader.lines();
     let mut batches = vec![];

@@ -146,6 +146,7 @@ impl App {
             .join("events");
         drop(r);
         let db = Arc::new(Db::open(path)?);
+        db.check_schema()?;
 
         let server = Server::create_with(db.clone(), setting.clone());
 
