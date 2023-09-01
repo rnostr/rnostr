@@ -160,11 +160,19 @@ impl Actor for Session {
 /// Handler for `ws::Message`
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        debug!("Session message {:?} {:?} {:?}", self.id, self.ip, msg);
+        debug!("Session message {:?} {:?} {:?}", msg, self.id, self.ip);
         let msg = match msg {
-            Err(_err) => {
-                increment_counter!("nostr_relay_session_stop_total", "reason" => "message error");
-                ctx.stop();
+            Err(err) => {
+                match err {
+                    ws::ProtocolError::Overflow => {
+                        ctx.text(OutgoingMessage::notice("payload reached size limit."));
+                    }
+                    _ => {
+                        debug!("Session error {:?} {:?} {:?}", err, self.id, self.ip);
+                        increment_counter!("nostr_relay_session_stop_total", "reason" => "message error");
+                        ctx.stop();
+                    }
+                }
                 return;
             }
             Ok(msg) => msg,
@@ -240,6 +248,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 ctx.text(OutgoingMessage::notice("Not support binary message"));
             }
             ws::Message::Continuation(_) => {
+                // TODO
                 increment_counter!("nostr_relay_session_stop_total", "reason" => "message continuation");
                 ctx.stop();
             }
@@ -349,7 +358,7 @@ mod tests {
     #[actix_rt::test]
     async fn extension() -> Result<()> {
         let mut srv = actix_test::start(|| {
-            let data = create_test_app("session").unwrap();
+            let data = create_test_app("extension").unwrap();
             data.add_extension(Ext).web_app()
         });
         let mut framed = srv.ws_at("/").await.unwrap();
@@ -360,6 +369,39 @@ mod tests {
         assert_eq!(
             item,
             ws::Frame::Text(Bytes::copy_from_slice(br#"["NOTICE","extension"]"#))
+        );
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn max_size() -> Result<()> {
+        let text = r#"["REQ", "1", {}]"#;
+        let max_size = text.len() + 1;
+        let mut srv = actix_test::start(move || {
+            let data = create_test_app("max_size").unwrap();
+            {
+                let mut w = data.setting.write();
+                w.limitation.max_message_length = max_size;
+            }
+            data.add_extension(Ext).web_app()
+        });
+        let mut framed = srv.ws_at("/").await.unwrap();
+        framed.send(ws::Message::Text(text.into())).await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(
+            item,
+            ws::Frame::Text(Bytes::copy_from_slice(br#"["NOTICE","extension"]"#))
+        );
+
+        framed
+            .send(ws::Message::Text(format!("{}  ", text).into()))
+            .await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(
+            item,
+            ws::Frame::Text(Bytes::copy_from_slice(
+                br#"["NOTICE","payload reached size limit."]"#
+            ))
         );
         Ok(())
     }

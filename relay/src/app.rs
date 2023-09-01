@@ -47,8 +47,16 @@ pub mod route {
     ) -> Result<HttpResponse, Error> {
         let r = data.setting.read();
         let ip = get_ip(&req, r.network.real_ip_header.as_ref());
+        let max_size = r.limitation.max_message_length;
         drop(r);
-        ws::start(Session::new(ip.unwrap_or_default(), data), &req, stream)
+
+        let session = Session::new(ip.unwrap_or_default(), data);
+
+        // ws::start(session, &req, stream)
+        // The default max frame size is 60k, change from setting.
+        ws::WsResponseBuilder::new(session, &req, stream)
+            .frame_size(max_size)
+            .start()
     }
 
     pub async fn information(
