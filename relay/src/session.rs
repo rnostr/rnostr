@@ -1,7 +1,9 @@
 use crate::{hash::NoOpHasherDefault, message::*, App, Server};
 use actix::prelude::*;
+use actix_http::ws::Item;
 use actix_web::web;
 use actix_web_actors::ws;
+use bytes::BytesMut;
 use metrics::{decrement_gauge, increment_counter, increment_gauge};
 use std::{
     any::{Any, TypeId},
@@ -35,6 +37,9 @@ pub struct Session {
 
     /// Simple store for save extension data
     data: HashMap<TypeId, Box<dyn Any>, NoOpHasherDefault>,
+
+    /// Buffer for constructing continuation messages
+    cont: Option<BytesMut>,
 }
 
 impl Session {
@@ -74,6 +79,7 @@ impl Session {
             heartbeat_interval,
             app,
             data: HashMap::default(),
+            cont: None,
         }
     }
 
@@ -93,6 +99,60 @@ impl Session {
 
             ctx.ping(b"");
         });
+    }
+
+    fn handle_message(&mut self, text: String, ctx: &mut ws::WebsocketContext<Self>) {
+        let msg = serde_json::from_str::<IncomingMessage>(&text);
+        match msg {
+            Ok(msg) => {
+                if let Some(cmd) = msg.known_command() {
+                    // only insert known command metrics
+                    increment_counter!("nostr_relay_message_total", "command" => cmd);
+                }
+
+                let mut msg = ClientMessage {
+                    id: self.id,
+                    text,
+                    msg,
+                };
+                {
+                    let r = self.app.setting.read();
+                    if let Err(err) = msg.validate(&r.limitation) {
+                        if let IncomingMessage::Event(event) = &msg.msg {
+                            ctx.text(OutgoingMessage::ok(
+                                &event.id_str(),
+                                false,
+                                &err.to_string(),
+                            ));
+                        } else {
+                            ctx.text(OutgoingMessage::notice(&err.to_string()));
+                        }
+                        return;
+                    }
+                }
+
+                match self
+                    .app
+                    .clone()
+                    .extensions
+                    .read()
+                    .call_message(msg, self, ctx)
+                {
+                    crate::ExtensionMessageResult::Continue(msg) => {
+                        self.server.do_send(msg);
+                    }
+                    crate::ExtensionMessageResult::Stop(out) => {
+                        ctx.text(out);
+                    }
+                    crate::ExtensionMessageResult::Ignore => {
+                        // ignore
+                    }
+                };
+            }
+            Err(err) => {
+                ctx.text(OutgoingMessage::notice(&format!("json error: {}", err)));
+            }
+        };
     }
 }
 
@@ -186,58 +246,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 self.hb = Instant::now();
             }
             ws::Message::Text(text) => {
-                let text = text.to_string();
-                let msg = serde_json::from_str::<IncomingMessage>(&text);
-                match msg {
-                    Ok(msg) => {
-                        if let Some(cmd) = msg.known_command() {
-                            // only insert known command metrics
-                            increment_counter!("nostr_relay_message_total", "command" => cmd);
-                        }
-
-                        let mut msg = ClientMessage {
-                            id: self.id,
-                            text,
-                            msg,
-                        };
-                        {
-                            let r = self.app.setting.read();
-                            if let Err(err) = msg.validate(&r.limitation) {
-                                if let IncomingMessage::Event(event) = &msg.msg {
-                                    ctx.text(OutgoingMessage::ok(
-                                        &event.id_str(),
-                                        false,
-                                        &err.to_string(),
-                                    ));
-                                } else {
-                                    ctx.text(OutgoingMessage::notice(&err.to_string()));
-                                }
-                                return;
-                            }
-                        }
-
-                        match self
-                            .app
-                            .clone()
-                            .extensions
-                            .read()
-                            .call_message(msg, self, ctx)
-                        {
-                            crate::ExtensionMessageResult::Continue(msg) => {
-                                self.server.do_send(msg);
-                            }
-                            crate::ExtensionMessageResult::Stop(out) => {
-                                ctx.text(out);
-                            }
-                            crate::ExtensionMessageResult::Ignore => {
-                                // ignore
-                            }
-                        };
-                    }
-                    Err(err) => {
-                        ctx.text(OutgoingMessage::notice(&format!("json error: {}", err)));
-                    }
-                };
+                self.handle_message(text.to_string(), ctx);
             }
             ws::Message::Close(reason) => {
                 ctx.close(reason);
@@ -247,11 +256,29 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
             ws::Message::Binary(_) => {
                 ctx.text(OutgoingMessage::notice("Not support binary message"));
             }
-            ws::Message::Continuation(_) => {
-                // TODO
-                increment_counter!("nostr_relay_session_stop_total", "reason" => "message continuation");
-                ctx.stop();
-            }
+            ws::Message::Continuation(cont) => match cont {
+                Item::FirstText(buf) => {
+                    let mut bytes = BytesMut::new();
+                    bytes.extend_from_slice(&buf);
+                    self.cont = Some(bytes);
+                }
+                Item::FirstBinary(_) => {
+                    ctx.text(OutgoingMessage::notice("Not support binary message"));
+                }
+                Item::Continue(buf) => {
+                    if let Some(bytes) = &mut self.cont {
+                        bytes.extend_from_slice(&buf);
+                    }
+                }
+                Item::Last(buf) => {
+                    if let Some(mut bytes) = self.cont.take() {
+                        bytes.extend_from_slice(&buf);
+                        if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                            self.handle_message(text, ctx);
+                        }
+                    }
+                }
+            },
             ws::Message::Nop => (),
         }
     }
@@ -339,36 +366,35 @@ mod tests {
         Ok(())
     }
 
-    struct Ext;
-    impl Extension for Ext {
+    struct Echo;
+    impl Extension for Echo {
         fn message(
             &self,
-            _msg: ClientMessage,
+            msg: ClientMessage,
             _session: &mut Session,
             _ctx: &mut <Session as actix::Actor>::Context,
         ) -> ExtensionMessageResult {
-            ExtensionMessageResult::Stop(OutgoingMessage::notice("extension"))
+            ExtensionMessageResult::Stop(OutgoingMessage(msg.text))
         }
 
         fn name(&self) -> &'static str {
-            "Ext"
+            "Echo"
         }
     }
 
     #[actix_rt::test]
     async fn extension() -> Result<()> {
+        let text = r#"["REQ", "1", {}]"#;
         let mut srv = actix_test::start(|| {
             let data = create_test_app("extension").unwrap();
-            data.add_extension(Ext).web_app()
+            data.add_extension(Echo).web_app()
         });
         let mut framed = srv.ws_at("/").await.unwrap();
-        framed
-            .send(ws::Message::Text(r#"["REQ", "1", {}]"#.into()))
-            .await?;
+        framed.send(ws::Message::Text(text.into())).await?;
         let item = framed.next().await.unwrap()?;
         assert_eq!(
             item,
-            ws::Frame::Text(Bytes::copy_from_slice(br#"["NOTICE","extension"]"#))
+            ws::Frame::Text(Bytes::copy_from_slice(text.as_bytes()))
         );
         Ok(())
     }
@@ -383,14 +409,14 @@ mod tests {
                 let mut w = data.setting.write();
                 w.limitation.max_message_length = max_size;
             }
-            data.add_extension(Ext).web_app()
+            data.add_extension(Echo).web_app()
         });
         let mut framed = srv.ws_at("/").await.unwrap();
         framed.send(ws::Message::Text(text.into())).await?;
         let item = framed.next().await.unwrap()?;
         assert_eq!(
             item,
-            ws::Frame::Text(Bytes::copy_from_slice(br#"["NOTICE","extension"]"#))
+            ws::Frame::Text(Bytes::copy_from_slice(text.as_bytes()))
         );
 
         framed
@@ -403,6 +429,38 @@ mod tests {
                 br#"["NOTICE","payload reached size limit."]"#
             ))
         );
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn continuation() -> Result<()> {
+        let text = br#"["REQ", "1", {}]"#;
+
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("extension").unwrap();
+            data.add_extension(Echo).web_app()
+        });
+        let mut framed = srv.ws_at("/").await.unwrap();
+        framed
+            .send(ws::Message::Continuation(Item::FirstText(
+                Bytes::copy_from_slice(&text[0..2]),
+            )))
+            .await?;
+
+        framed
+            .send(ws::Message::Continuation(Item::Continue(
+                Bytes::copy_from_slice(&text[2..4]),
+            )))
+            .await?;
+        framed
+            .send(ws::Message::Continuation(Item::Last(
+                Bytes::copy_from_slice(&text[4..]),
+            )))
+            .await?;
+
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Text(Bytes::copy_from_slice(text)));
+
         Ok(())
     }
 }
