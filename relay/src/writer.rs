@@ -1,7 +1,7 @@
 use crate::{message::*, Result};
 use actix::prelude::*;
-use metrics::histogram;
-use nostr_db::{now, Db};
+use metrics::{histogram, increment_counter};
+use nostr_db::{now, CheckEventResult, Db};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -40,11 +40,16 @@ impl Writer {
             let mut writer = self.db.writer()?;
             while let Some(event) = self.events.pop() {
                 match self.db.put(&mut writer, &event.event) {
-                    Ok(result) => self.addr.do_send(WriteEventResult::Write {
-                        id: event.id,
-                        event: event.event,
-                        result,
-                    }),
+                    Ok(result) => {
+                        if let CheckEventResult::Ok(_num) = result {
+                            increment_counter!("nostr_relay_new_event");
+                        }
+                        self.addr.do_send(WriteEventResult::Write {
+                            id: event.id,
+                            event: event.event,
+                            result,
+                        });
+                    }
                     Err(err) => {
                         error!(error = err.to_string(), "write event error");
                         let eid = event.event.id_str();

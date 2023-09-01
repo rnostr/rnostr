@@ -61,6 +61,7 @@ pub fn describe_metrics() {
         "nostr_relay_message_total",
         "The total count of message from client"
     );
+    describe_counter!("nostr_relay_new_event", "The total count of new event");
     describe_histogram!("nostr_relay_db_get", "The time of per filter get");
     describe_histogram!("nostr_relay_db_write", "The time of per write transaction");
 }
