@@ -11,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::debug;
+use ws::Message;
 
 pub struct Session {
     ip: String,
@@ -187,7 +188,7 @@ impl Actor for Session {
                     Ok(res) => {
                         act.id = res;
                         act.app.clone().extensions.read().call_connected(act, ctx);
-                        debug!("Session started {:?} {:?}", act.id, act.ip);
+                        debug!("Session started {} {}", act.id, act.ip);
                     }
                     // something is wrong with server
                     _ => {
@@ -213,14 +214,17 @@ impl Actor for Session {
             .extensions
             .read()
             .call_disconnected(self, ctx);
-        debug!("Session stopped {:?} {:?}", self.id, self.ip);
+        debug!("Session stopped {} {}", self.id, self.ip);
     }
 }
 
 /// Handler for `ws::Message`
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        debug!("Session message {:?} {:?} {:?}", msg, self.id, self.ip);
+        // Text will log after processing
+        if !matches!(msg, Ok(Message::Text(_)) | Ok(Message::Continuation(_))) {
+            debug!("Session message {} {} {:?}", self.id, self.ip, msg);
+        }
         let msg = match msg {
             Err(err) => {
                 match err {
@@ -228,7 +232,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                         ctx.text(OutgoingMessage::notice("payload reached size limit."));
                     }
                     _ => {
-                        debug!("Session error {:?} {:?} {:?}", err, self.id, self.ip);
+                        debug!("Session error {} {} {:?}", self.id, self.ip, err);
                         increment_counter!("nostr_relay_session_stop_total", "reason" => "message error");
                         ctx.stop();
                     }
@@ -246,7 +250,9 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                 self.hb = Instant::now();
             }
             ws::Message::Text(text) => {
-                self.handle_message(text.to_string(), ctx);
+                let text = text.to_string();
+                debug!("Session text {} {} {}", self.id, self.ip, text);
+                self.handle_message(text, ctx);
             }
             ws::Message::Close(reason) => {
                 ctx.close(reason);
@@ -274,6 +280,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                     if let Some(mut bytes) = self.cont.take() {
                         bytes.extend_from_slice(&buf);
                         if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                            debug!("Session text {} {} {}", self.id, self.ip, text);
                             self.handle_message(text, ctx);
                         }
                     }

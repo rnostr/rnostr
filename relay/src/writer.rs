@@ -35,11 +35,18 @@ impl Writer {
 
     pub fn write(&mut self) -> Result<()> {
         if !self.events.is_empty() {
-            debug!("write events: {:?}", self.events);
             let start = Instant::now();
             let mut writer = self.db.writer()?;
             while let Some(event) = self.events.pop() {
-                match self.db.put(&mut writer, &event.event) {
+                let res = self.db.put(&mut writer, &event.event);
+                debug!(
+                    "write event: {} {} {:?}",
+                    event.id,
+                    event.event.id_str(),
+                    res,
+                );
+
+                match res {
                     Ok(result) => {
                         if let CheckEventResult::Ok(_num) = result {
                             increment_counter!("nostr_relay_new_event");
