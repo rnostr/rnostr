@@ -22,13 +22,11 @@ use std::{
 type Result<T, E = Error> = core::result::Result<T, E>;
 
 pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
-    while let Some(last) = key.pop() {
-        if last < u8::max_value() {
-            key.push(last + 1);
-            return Some(key);
-        }
-    }
-    None
+    key.iter().rposition(|&x| x < u8::MAX).map(|position| {
+        key[position] += 1;
+        key.truncate(position + 1);
+        key
+    })
 }
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
@@ -1141,5 +1139,22 @@ where
         } else {
             self.next_inner().transpose()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::upper;
+
+    #[test]
+    pub fn test_upper_fn() {
+        assert_eq!(upper(vec![1, 2, 3, 4, 5]), Some(vec![1, 2, 3, 4, 6]));
+        assert_eq!(upper(vec![1, 2, 3, 4, 255]), Some(vec![1, 2, 3, 5]));
+        assert_eq!(upper(vec![1, 2, 3, 255, 255]), Some(vec![1, 2, 4]));
+        assert_eq!(upper(vec![1, 2, 255, 255, 255]), Some(vec![1, 3]));
+        assert_eq!(upper(vec![1, 255, 255, 255, 255]), Some(vec![2]));
+        assert_eq!(upper(vec![255, 255, 255, 255, 255]), None);
+        assert_eq!(upper(vec![1, 2, 3, 255, 5]), Some(vec![1, 2, 3, 255, 6]));
+        assert_eq!(upper(vec![255, 2, 3, 4, 5]), Some(vec![255, 2, 3, 4, 6]));
     }
 }
