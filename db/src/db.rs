@@ -315,17 +315,7 @@ fn get_uid<K: AsRef<[u8]>, T: Transaction>(
     id_tree: &Tree,
     event_id: K,
 ) -> Result<Option<Vec<u8>>, Error> {
-    Ok(reader
-        .get(id_tree, event_id.as_ref())?
-        .map(|v| v.as_ref().to_vec()))
-    // let mut iter = reader.iter_from(id_tree, Bound::Included(event_id.as_ref()), false);
-    // if let Some(item) = iter.next() {
-    //     let (k, v, _) = item?;
-    //     if k.as_ref().starts_with(event_id.as_ref()) {
-    //         return Ok(Some(v.as_ref().to_vec()));
-    //     }
-    // }
-    // Ok(None)
+    Ok(reader.get(id_tree, event_id)?.map(|v| v.to_vec()))
 }
 
 #[derive(Debug, Clone)]
@@ -525,7 +515,7 @@ impl Db {
             &self.t_id_uid,
             &self.t_data,
             &self.t_index,
-            event_id.as_ref(),
+            event_id,
         )? {
             self.del_event(writer, &event, &uid)?;
             Ok(true)
