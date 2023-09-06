@@ -699,7 +699,7 @@ fn create_iter<'a, R: Transaction>(
             .unwrap_or(Bound::Unbounded);
         reader.iter_from(tree, start, true)
     } else {
-        reader.iter_from(tree, Bound::Included(&prefix), false)
+        reader.iter_from(tree, Bound::Included(prefix), false)
     }
 }
 
