@@ -748,7 +748,7 @@ where
         let scanner = Scanner::new(
             iter,
             vec![],
-            prefix.clone(),
+            prefix,
             filter.desc,
             filter.since,
             filter.until,
@@ -772,7 +772,7 @@ where
             let scanner = Scanner::new(
                 iter,
                 vec![],
-                prefix.clone(),
+                prefix,
                 filter.desc,
                 filter.since,
                 filter.until,
@@ -814,7 +814,7 @@ where
                 let scanner = Scanner::new(
                     iter,
                     vec![],
-                    prefix.clone(),
+                    prefix,
                     filter.desc,
                     filter.since,
                     filter.until,
@@ -875,7 +875,7 @@ where
                     let scanner = Scanner::new(
                         iter,
                         key.as_bytes().to_vec(),
-                        prefix.clone(),
+                        prefix,
                         filter.desc,
                         filter.since,
                         filter.until,
@@ -898,7 +898,7 @@ where
                 let scanner = Scanner::new(
                     iter,
                     key.as_bytes().to_vec(),
-                    prefix.clone(),
+                    prefix,
                     filter.desc,
                     filter.since,
                     filter.until,
@@ -956,7 +956,7 @@ where
             let scanner = Scanner::new(
                 iter,
                 key.as_bytes().to_vec(),
-                prefix.clone(),
+                prefix,
                 filter.desc,
                 filter.since,
                 filter.until,
@@ -995,7 +995,7 @@ where
                 let scanner = Scanner::new(
                     iter,
                     vec![],
-                    prefix.clone(),
+                    prefix,
                     filter.desc,
                     filter.since,
                     filter.until,
