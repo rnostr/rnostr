@@ -1,6 +1,6 @@
 [package]
 name = "rnostr"
-version = "0.4.1"
+version = "0.4.2"
 description = "A high-performance and scalable nostr relay."
 keywords = ["nostr", "nostr-relay"]
 edition.workspace = true
@@ -19,9 +19,9 @@ anyhow = "1.0.70"
 clap = { version = "4.2.7", features = ["derive"] }
 clio = { version = "0.2.7", features = ["clap-parse"] }
 indicatif = "0.17.3"
-nostr-db = { version = "0.4.1", path = "./db", features = ["search"] }
-nostr-relay = { version = "0.4.1", path = "./relay", features = ["search"] }
-nostr-extensions = { version = "0.4.1", path = "./extensions" }
+nostr-db = { version = "0.4.2", path = "./db", features = ["search"] }
+nostr-relay = { version = "0.4.2", path = "./relay", features = ["search"] }
+nostr-extensions = { version = "0.4.2", path = "./extensions" }
 rayon = "1.7.0"
 thiserror = "1.0.40"
 tracing = "0.1.37"
