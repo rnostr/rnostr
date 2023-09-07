@@ -84,6 +84,12 @@ impl Handler<Disconnect> for Server {
     fn handle(&mut self, msg: Disconnect, _: &mut Self::Context) {
         // remove address
         self.sessions.remove(&msg.id);
+
+        // clear subscriptions
+        self.subscriber.do_send(Unsubscribe {
+            id: msg.id,
+            sub_id: None,
+        });
     }
 }
 
