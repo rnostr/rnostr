@@ -284,7 +284,7 @@ fn get_event_by_uid<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
     if R::only_id() {
         // get event id from index more faster
         let v = reader.get(index_tree, uid)?;
-        let event = decode_event_index(&v)?;
+        let event = decode_event_index(v)?;
         if let Some(v) = event {
             return Ok(Some(
                 R::from_data(v.id()).map_err(|e| Error::Message(e.to_string()))?,
@@ -301,7 +301,7 @@ fn get_event_by_uid<R: FromEventData, K: AsRef<[u8]>, T: Transaction>(
     Ok(None)
 }
 
-fn decode_event_index<'a>(v: &'a Option<&[u8]>) -> Result<Option<&'a ArchivedEventIndex>, Error> {
+fn decode_event_index(v: Option<&[u8]>) -> Result<Option<&ArchivedEventIndex>, Error> {
     if let Some(v) = v {
         return Ok(Some(EventIndex::from_zeroes(v)?));
     }
@@ -1036,7 +1036,7 @@ where
                 }
             } else {
                 let data = self.index_data(&key)?;
-                let event = decode_event_index(&data)?;
+                let event = decode_event_index(data)?;
                 self.get_index += 1;
                 if let Some(event) = event {
                     if self.match_index.r#match(&self.filter, event) {
@@ -1094,7 +1094,7 @@ where
                 }
             } else {
                 let data = self.index_data(&key)?;
-                let event = decode_event_index(&data)?;
+                let event = decode_event_index(data)?;
                 self.get_index += 1;
                 if let Some(event) = event {
                     if self.match_index.r#match(&self.filter, event) {
