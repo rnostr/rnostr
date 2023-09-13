@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{message::*, setting::SettingWrapper};
 use actix::prelude::*;
-use nostr_db::Event;
+use nostr_db::{Event, Filter};
 
 // TODO: use btree index for fast filter
 pub struct Subscriber {
     pub addr: Recipient<SubscribeResult>,
     pub events: Vec<(usize, Event)>,
-    /// map session id -> sub id -> subscription
-    pub subscriptions: HashMap<usize, HashMap<String, Subscription>>,
+    /// map session_id -> subscription_id -> filters
+    pub subscriptions: HashMap<usize, HashMap<String, Vec<Filter>>>,
     pub setting: SettingWrapper,
 }
 
@@ -35,15 +35,19 @@ impl Handler<Subscribe> for Subscriber {
     type Result = Subscribed;
     fn handle(&mut self, msg: Subscribe, _: &mut Self::Context) -> Subscribed {
         let map = self.subscriptions.entry(msg.id).or_default();
-        let sub_id = msg.subscription.id.clone();
-        let r = self.setting.read();
-        if map.contains_key(&sub_id) {
-            Subscribed::Duplicate
-        } else if map.len() >= r.limitation.max_subscriptions {
+        if map.len() >= self.setting.read().limitation.max_subscriptions {
             Subscribed::Overlimit
         } else {
-            map.insert(msg.subscription.id.clone(), msg.subscription);
-            Subscribed::Ok
+            let Subscription { id, filters } = msg.subscription;
+            // according to NIP-01, <subscription_id> is an arbitrary, non-empty string of max length 64 chars
+            if id.is_empty() || id.len() > 64 {
+                Subscribed::InvalidIdLength
+            } else if let Entry::Vacant(entry) = map.entry(id) {
+                entry.insert(filters);
+                Subscribed::Ok
+            } else {
+                Subscribed::Duplicate
+            }
         }
     }
 }
@@ -68,8 +72,8 @@ impl Handler<Dispatch> for Subscriber {
         let index = event.index();
         let event_str = event.to_string();
         for (session_id, subs) in &self.subscriptions {
-            for (sub_id, sub) in subs {
-                for filter in &sub.filters {
+            for (sub_id, filters) in subs {
+                for filter in filters {
                     if filter.r#match(index) {
                         self.addr.do_send(SubscribeResult {
                             id: *session_id,
@@ -181,6 +185,35 @@ mod tests {
             })
             .await?;
         assert_eq!(res, Subscribed::Ok);
+
+        let res = subscriber
+            .send(Subscribe {
+                id: 0,
+                subscription: Subscription {
+                    id: "".to_string(),
+                    filters: vec![Filter {
+                        kinds: Some(vec![1000]),
+                        ..Default::default()
+                    }],
+                },
+            })
+            .await?;
+        assert_eq!(res, Subscribed::InvalidIdLength);
+
+        let res = subscriber
+            .send(Subscribe {
+                id: 0,
+                subscription: Subscription {
+                    id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefA"
+                        .to_string(),
+                    filters: vec![Filter {
+                        kinds: Some(vec![1000]),
+                        ..Default::default()
+                    }],
+                },
+            })
+            .await?;
+        assert_eq!(res, Subscribed::InvalidIdLength);
 
         subscriber
             .send(Dispatch {
