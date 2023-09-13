@@ -8,7 +8,7 @@ use std::{
     ffi::{CStr, CString},
     fs,
     marker::PhantomData,
-    mem,
+    mem::{self, MaybeUninit},
     ops::{Bound, Deref},
     path::Path,
     ptr, slice,
@@ -85,13 +85,10 @@ pub trait Transaction: Sized {
             mv_data: key.as_ptr() as *mut c_void,
         };
 
-        let mut data_val = ffi::MDB_val {
-            mv_size: 0,
-            mv_data: ptr::null_mut(),
-        };
+        let mut data_val = MaybeUninit::uninit();
         unsafe {
-            match ffi::mdb_get(self.txn(), tree.inner, &mut key_val, &mut data_val) {
-                ffi::MDB_SUCCESS => Ok(Some(val_to_slice(data_val))),
+            match ffi::mdb_get(self.txn(), tree.inner, &mut key_val, data_val.as_mut_ptr()) {
+                ffi::MDB_SUCCESS => Ok(Some(val_to_slice(data_val.assume_init()))),
                 ffi::MDB_NOTFOUND => Ok(None),
                 err_code => Err(lmdb_error(err_code)),
             }
@@ -590,21 +587,14 @@ impl<'txn> IterInner<'txn> {
     }
 
     fn get_by_key(&mut self, key: &[u8], op: c_uint) -> Item<'txn> {
-        let key = ffi::MDB_val {
+        let mut key = ffi::MDB_val {
             mv_size: key.len() as size_t,
             mv_data: key.as_ptr() as *mut c_void,
         };
-        self.get_by_mdb_key(key, op)
-    }
-
-    fn get_by_mdb_key(&mut self, mut key: ffi::MDB_val, op: c_uint) -> Item<'txn> {
-        let mut data = ffi::MDB_val {
-            mv_size: 0,
-            mv_data: ptr::null_mut(),
-        };
+        let mut data = MaybeUninit::uninit();
         unsafe {
-            match ffi::mdb_cursor_get(self.cursor, &mut key, &mut data, op) {
-                ffi::MDB_SUCCESS => Ok(Some((val_to_slice(key), val_to_slice(data)))),
+            match ffi::mdb_cursor_get(self.cursor, &mut key, data.as_mut_ptr(), op) {
+                ffi::MDB_SUCCESS => Ok(Some((val_to_slice(key), val_to_slice(data.assume_init())))),
                 // EINVAL can occur when the cursor was previously seeked to a non-existent value,
                 // e.g. iter_from with a key greater than all values in the database.
                 ffi::MDB_NOTFOUND | EINVAL => Ok(None),
@@ -614,11 +604,20 @@ impl<'txn> IterInner<'txn> {
     }
 
     fn get(&mut self, op: c_uint) -> Item<'txn> {
-        let key = ffi::MDB_val {
-            mv_size: 0,
-            mv_data: ptr::null_mut(),
-        };
-        self.get_by_mdb_key(key, op)
+        let mut key = MaybeUninit::uninit();
+        let mut data = MaybeUninit::uninit();
+        unsafe {
+            match ffi::mdb_cursor_get(self.cursor, key.as_mut_ptr(), data.as_mut_ptr(), op) {
+                ffi::MDB_SUCCESS => Ok(Some((
+                    val_to_slice(key.assume_init()),
+                    val_to_slice(data.assume_init()),
+                ))),
+                // EINVAL can occur when the cursor was previously seeked to a non-existent value,
+                // e.g. iter_from with a key greater than all values in the database.
+                ffi::MDB_NOTFOUND | EINVAL => Ok(None),
+                error => Err(lmdb_error(error)),
+            }
+        }
     }
 }
 
