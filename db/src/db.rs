@@ -30,7 +30,7 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 }
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
-const DB_VERSION: &str = "2";
+const DB_VERSION: &str = "3";
 
 #[derive(Clone)]
 pub struct Db {
