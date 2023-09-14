@@ -339,6 +339,7 @@ pub enum Subscribed {
     Ok,
     Overlimit,
     Duplicate,
+    InvalidIdLength,
 }
 
 #[derive(Message, Clone, Debug)]

@@ -143,6 +143,12 @@ impl Handler<ClientMessage> for Server {
                                         session_id,
                                         OutgoingMessage::notice("This subscription already exists"),
                                     );
+                                },
+                                Subscribed::InvalidIdLength => {
+                                    act.send_to_client(
+                                        session_id,
+                                        OutgoingMessage::notice("Subscription id should be non-empty string of max length 64 chars"),
+                                    );
                                 }
                             },
                             Err(_err) => {
