@@ -11,7 +11,7 @@ pub struct MyEvent {
     id: Vec<u8>,
     pubkey: Vec<u8>,
     created_at: u64,
-    kind: u64,
+    kind: u16,
     tags: Vec<Vec<String>>,
     content: String,
     sig: Vec<u8>,
@@ -644,7 +644,7 @@ pub fn test_query_author_kinds() -> Result<()> {
             MyEvent {
                 id: id(15, i),
                 pubkey: author(20),
-                kind: 1000 + (i / 2) as u64,
+                kind: 1000 + (i / 2) as u16,
                 content: "author 2 kind".to_owned(),
                 created_at: i as u64 * 1000,
                 ..Default::default()
@@ -659,7 +659,7 @@ pub fn test_query_author_kinds() -> Result<()> {
             MyEvent {
                 id: id(16, i),
                 pubkey: author(20),
-                kind: 1000 + (i / 2) as u64,
+                kind: 1000 + (i / 2) as u16,
                 content: "author 2 kind".to_owned(),
                 created_at: 100_000 + i as u64 * 1000,
                 ..Default::default()
@@ -733,7 +733,7 @@ pub fn test_query_authors() -> Result<()> {
             MyEvent {
                 id: id(25, i),
                 pubkey: author(20),
-                kind: 1 + i as u64,
+                kind: 1 + i as u16,
                 content: "author 2 kind".to_owned(),
                 created_at: i as u64 * 1000,
                 tags: vec![vec!["t".to_owned(), "query tag1".to_owned()]],
@@ -875,7 +875,7 @@ pub fn test_query_tag() -> Result<()> {
             MyEvent {
                 id: id(10, i),
                 pubkey: author(30),
-                kind: i as u64,
+                kind: i as u16,
                 content: "author 3 tag".to_owned(),
                 created_at: i as u64 * 1000,
                 tags: vec![
@@ -896,7 +896,7 @@ pub fn test_query_tag() -> Result<()> {
             MyEvent {
                 id: id(25, i),
                 pubkey: author(20),
-                kind: i as u64,
+                kind: i as u16,
                 content: "author 2 kind".to_owned(),
                 created_at: i as u64 * 1000,
                 tags: vec![
@@ -1007,7 +1007,7 @@ pub fn test_query_kinds() -> Result<()> {
             MyEvent {
                 id: id(15, i),
                 pubkey: author(20),
-                kind: 1000 + (i / 2) as u64,
+                kind: 1000 + (i / 2) as u16,
                 content: "author 2 kind".to_owned(),
                 created_at: i as u64 * 1000,
                 ..Default::default()
@@ -1022,7 +1022,7 @@ pub fn test_query_kinds() -> Result<()> {
             MyEvent {
                 id: id(16, i),
                 pubkey: author(20),
-                kind: 1000 + (i / 2) as u64,
+                kind: 1000 + (i / 2) as u16,
                 content: "author 2 kind".to_owned(),
                 created_at: 100_000 + i as u64 * 1000,
                 ..Default::default()
@@ -1081,7 +1081,7 @@ pub fn test_query_ids() -> Result<()> {
             MyEvent {
                 id: id(10, i),
                 pubkey: author(30),
-                kind: i as u64,
+                kind: i as u16,
                 content: "author 3 tag".to_owned(),
                 created_at: i as u64 * 1000,
                 tags: vec![vec!["t".to_owned(), "query tag".to_owned()]],

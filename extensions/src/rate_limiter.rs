@@ -98,7 +98,7 @@ impl EventQuota {
         }
         if let Some(list) = &self.kinds {
             for range in list {
-                if range.contains(event.kind()) {
+                if range.contains(event.kind() as u64) {
                     return true;
                 }
             }

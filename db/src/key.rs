@@ -34,7 +34,7 @@ impl IndexKey {
         [id.as_ref(), &time.to_be_bytes()[..]].concat()
     }
 
-    pub fn encode_kind(kind: u64, time: u64) -> Vec<u8> {
+    pub fn encode_kind(kind: u16, time: u64) -> Vec<u8> {
         [&kind.to_be_bytes()[..], &time.to_be_bytes()[..]].concat()
     }
 
@@ -42,7 +42,7 @@ impl IndexKey {
         [pubkey.as_ref(), &time.to_be_bytes()[..]].concat()
     }
 
-    pub fn encode_pubkey_kind<P: AsRef<[u8]>>(pubkey: P, kind: u64, time: u64) -> Vec<u8> {
+    pub fn encode_pubkey_kind<P: AsRef<[u8]>>(pubkey: P, kind: u16, time: u64) -> Vec<u8> {
         [
             pubkey.as_ref(),
             &kind.to_be_bytes()[..],
@@ -99,15 +99,19 @@ pub fn u64_to_ver(num: u64) -> Vec<u8> {
     num.to_be_bytes().to_vec()
 }
 
+pub fn u16_to_ver(num: u16) -> Vec<u8> {
+    num.to_be_bytes().to_vec()
+}
+
 // Replaceable Events [NIP-16](https://nips.be/16)
 // Parameterized Replaceable Events [NIP-33](https://nips.be/33)
-pub fn encode_replace_key(kind: u64, pubkey: &Vec<u8>, tags: &[Vec<String>]) -> Option<Vec<u8>> {
+pub fn encode_replace_key(kind: u16, pubkey: &Vec<u8>, tags: &[Vec<String>]) -> Option<Vec<u8>> {
     if kind == 0 || kind == 3 || kind == 41 || (10_000..20_000).contains(&kind) {
-        let k = u64_to_ver(kind);
+        let k = u16_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
         Some([p, &k[..]].concat())
     } else if (30_000..40_000).contains(&kind) {
-        let k = u64_to_ver(kind);
+        let k = u16_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
         let tag = tags
             .get(0)
@@ -124,17 +128,17 @@ pub fn encode_replace_key(kind: u64, pubkey: &Vec<u8>, tags: &[Vec<String>]) -> 
         None
     }
 }
-type ReplaceKey<'a> = (&'a [u8], u64, &'a [u8], u64);
+type ReplaceKey<'a> = (&'a [u8], u16, &'a [u8], u64);
 #[allow(unused)]
 pub fn decode_replace_key<'a>(val: &'a [u8], time: &'a [u8]) -> Result<ReplaceKey<'a>, Error> {
     let len = val.len();
-    if len < 32 + 8 {
+    if len < 32 + 2 {
         Err(Error::InvalidLength)
     } else {
         let pubkey = &val[0..32];
-        let kind = u64::from_be_bytes(val[32..40].try_into()?);
+        let kind = u16::from_be_bytes(val[32..34].try_into()?);
+        let tag = &val[34..];
         let time = u64::from_be_bytes(time.try_into()?);
-        let tag = &val[40..];
         Ok((pubkey, kind, tag, time))
     }
 }
@@ -174,7 +178,7 @@ mod tests {
     fn index_key() -> Result<()> {
         let time = 20u64;
         let id = pad_start(&vec![1, 2, 3], 32);
-        let kind = 10u64;
+        let kind = 10u16;
         let pubkey = vec![1; 32];
         let tag_key = "d";
         let tag_val = "m";
