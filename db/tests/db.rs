@@ -6,15 +6,15 @@ use std::time::Duration;
 
 type Result<T, E = Error> = core::result::Result<T, E>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MyEvent {
-    id: Vec<u8>,
-    pubkey: Vec<u8>,
+    id: [u8; 32],
+    pubkey: [u8; 32],
     created_at: u64,
     kind: u16,
     tags: Vec<Vec<String>>,
     content: String,
-    sig: Vec<u8>,
+    sig: [u8; 64],
 }
 
 impl MyEvent {
@@ -22,6 +22,20 @@ impl MyEvent {
         let mut e: Event = self.into();
         e.build_note_words();
         e
+    }
+}
+
+impl Default for MyEvent {
+    fn default() -> Self {
+        Self {
+            id: [0; 32],
+            pubkey: [0; 32],
+            created_at: 0,
+            kind: 0,
+            tags: Vec::new(),
+            content: String::new(),
+            sig: [0; 64],
+        }
     }
 }
 
@@ -48,15 +62,22 @@ pub fn create_db(t: &str) -> Result<Db> {
     Db::open(dir.path())
 }
 
-const PREFIX: [u8; 29] = [0; 29];
 const PER_NUM: u8 = 30;
 
-fn author(index: u8) -> Vec<u8> {
-    [PREFIX.to_vec(), vec![1u8, 0, index]].concat()
+fn author(index: u8) -> [u8; 32] {
+    let mut pubkey = [0; 32];
+    pubkey[29] = 1;
+    pubkey[30] = 0;
+    pubkey[31] = index;
+    pubkey
 }
 
-fn id(p: u8, index: u8) -> Vec<u8> {
-    [PREFIX.to_vec(), vec![1u8, p, index]].concat()
+fn id(p: u8, index: u8) -> [u8; 32] {
+    let mut id = [0; 32];
+    id[29] = 1;
+    id[30] = p;
+    id[31] = index;
+    id
 }
 
 #[test]

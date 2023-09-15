@@ -383,13 +383,13 @@ mod tests {
 
         let event = Event::create(&key_pair, 0, 1, vec![], "".to_owned())?;
         let event = Event::new(
-            event.id().to_vec(),
-            event.pubkey().to_vec(),
+            event.id().clone(),
+            event.pubkey().clone(),
             event.created_at(),
             2,
             vec![],
             "".to_owned(),
-            event.sig().to_vec(),
+            event.sig().clone(),
         )?;
         framed
             .send(ws::Message::Text(
