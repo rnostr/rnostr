@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    key::{concat, concat_sep, encode_replace_key, u64_to_ver, IndexKey},
+    key::{concat, concat_sep, encode_replace_key, u16_to_ver, u64_to_ver, IndexKey},
     ArchivedEventIndex, Event, EventIndex, Filter, FromEventData, Stats,
 };
 use nostr_kv::{
@@ -30,7 +30,7 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 }
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
-const DB_VERSION: &str = "2";
+const DB_VERSION: &str = "3";
 
 #[derive(Clone)]
 pub struct Db {
@@ -65,6 +65,10 @@ pub struct Db {
 
 fn u64_from_bytes(bytes: &[u8]) -> Result<u64, Error> {
     Ok(u64::from_be_bytes(bytes.try_into()?))
+}
+
+fn u16_from_bytes(bytes: &[u8]) -> Result<u16, Error> {
+    Ok(u16::from_be_bytes(bytes.try_into()?))
 }
 
 // Get the latest seq from db
@@ -757,7 +761,7 @@ where
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, false, false);
         for kind in filter.kinds.as_ref().unwrap().iter() {
-            let prefix = u64_to_ver(*kind);
+            let prefix = u16_to_ver(*kind);
             let iter = create_iter(reader, view, &prefix, filter.desc);
             let scanner = Scanner::new(
                 iter,
@@ -814,7 +818,7 @@ where
                         Ok(if k.len() == klen && k.starts_with(&s.prefix) {
                             // filter
                             if has_kind
-                                && !Filter::match_kind(kinds.as_ref(), u64_from_bytes(&v[8..16])?)
+                                && !Filter::match_kind(kinds.as_ref(), u16_from_bytes(&v[8..10])?)
                             {
                                 MatchResult::Continue
                             } else {
@@ -860,7 +864,7 @@ where
             // full key
             if key.len() == key_len * 2 {
                 for kind in kinds.iter() {
-                    let prefix: Vec<u8> = concat(&prefix, u64_to_ver(*kind));
+                    let prefix: Vec<u8> = concat(&prefix, u16_to_ver(*kind));
                     let iter = create_iter(reader, view, &prefix, filter.desc);
                     let scanner = Scanner::new(
                         iter,
@@ -901,7 +905,7 @@ where
                         };
                         Ok(if ok {
                             // check kind
-                            let kind = u64_from_bytes(&k[32..40])?;
+                            let kind = u16_from_bytes(&k[32..34])?;
                             if !clone_kinds.contains(&kind) {
                                 MatchResult::Continue
                             } else {

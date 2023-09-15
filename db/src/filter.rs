@@ -45,7 +45,7 @@ pub struct Filter {
     pub authors: Option<Vec<String>>,
 
     /// a list of a kind numbers
-    pub kinds: Option<Vec<u64>>,
+    pub kinds: Option<Vec<u16>>,
 
     pub since: Option<u64>,
     pub until: Option<u64>,
@@ -76,7 +76,7 @@ impl FromStr for Filter {
 struct _Filter {
     pub ids: Option<Vec<String>>,
     pub authors: Option<Vec<String>>,
-    pub kinds: Option<Vec<u64>>,
+    pub kinds: Option<Vec<u16>>,
     pub since: Option<u64>,
     pub until: Option<u64>,
     pub limit: Option<u64>,
@@ -221,7 +221,7 @@ impl Filter {
         })
     }
 
-    pub fn match_kind(kinds: Option<&Vec<u64>>, kind: u64) -> bool {
+    pub fn match_kind(kinds: Option<&Vec<u16>>, kind: u16) -> bool {
         kinds.map_or(true, |ks| ks.contains(&kind))
     }
 
@@ -328,7 +328,7 @@ mod tests {
             "until": 5,
             "since": 3,
             "limit": 6,
-            "#d": ["ab", "cd", "12"], 
+            "#d": ["ab", "cd", "12"],
             "#f": ["ab", "cd", "12", "ab"],
             "#b": [],
             "search": "abc",

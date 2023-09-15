@@ -36,7 +36,7 @@ pub struct EventIndex {
 
     created_at: u64,
 
-    kind: u64,
+    kind: u16,
 
     #[serde(skip)]
     tags: Tags,
@@ -74,7 +74,7 @@ impl EventIndex {
         id: Vec<u8>,
         pubkey: Vec<u8>,
         created_at: u64,
-        kind: u64,
+        kind: u16,
         tags: &Vec<Vec<String>>,
     ) -> Result<Self, Error> {
         let (tags, expiration, delegator) = Self::build_index_tags(tags)?;
@@ -149,7 +149,7 @@ impl EventIndex {
         self.created_at
     }
 
-    pub fn kind(&self) -> u64 {
+    pub fn kind(&self) -> u16 {
         self.kind
     }
 
@@ -191,7 +191,7 @@ impl ArchivedEventIndex {
         self.created_at
     }
 
-    pub fn kind(&self) -> u64 {
+    pub fn kind(&self) -> u16 {
         self.kind
     }
 
@@ -228,7 +228,7 @@ struct _Event {
     #[serde(with = "hex::serde")]
     pubkey: Vec<u8>,
     created_at: u64,
-    kind: u64,
+    kind: u16,
     #[serde(default)]
     tags: Vec<Vec<String>>,
     #[serde(default)]
@@ -286,7 +286,7 @@ impl Event {
         id: Vec<u8>,
         pubkey: Vec<u8>,
         created_at: u64,
-        kind: u64,
+        kind: u16,
         tags: Vec<Vec<String>>,
         content: String,
         sig: Vec<u8>,
@@ -305,7 +305,7 @@ impl Event {
     pub fn create(
         key_pair: &KeyPair,
         created_at: u64,
-        kind: u64,
+        kind: u16,
         tags: Vec<Vec<String>>,
         content: String,
     ) -> Result<Self, Error> {
@@ -470,7 +470,7 @@ impl Event {
         self.index.created_at
     }
 
-    pub fn kind(&self) -> u64 {
+    pub fn kind(&self) -> u16 {
         self.index.kind
     }
 
@@ -497,7 +497,7 @@ pub fn now() -> u64 {
 fn hash(
     pubkey: &[u8],
     created_at: u64,
-    kind: u64,
+    kind: u16,
     tags: &Vec<Vec<String>>,
     content: &String,
 ) -> Vec<u8> {
@@ -598,7 +598,7 @@ fn verify_delegation(
     // check conditions
     for cond in conditions.split('&') {
         if let Some(kind) = cond.strip_prefix("kind=") {
-            let n = u64::from_str(kind)?;
+            let n = u16::from_str(kind)?;
             if n != event.kind() {
                 return Err(Error::Invalid(format!(
                     "event kind must be {}",
@@ -748,6 +748,21 @@ mod tests {
         let event = Event::from_str(note);
         assert!(event.is_err());
 
+        // invalid kind
+        let note = r#"
+        {
+            "content": "Good morning everyone 😃",
+            "created_at": 1680690006,
+            "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d",
+            "kind": 65536,
+            "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+            "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+            "tags": [["t", "nostr"]]
+          }
+        "#;
+        let event = Event::from_str(note);
+        assert!(event.is_err());
+
         Ok(())
     }
 
@@ -780,7 +795,7 @@ mod tests {
         assert!(!event.index().is_ephemeral());
 
         let note = r#"
-        {"content":"{\"display_name\": \"maglevclient\", \"uptime\": 103180, \"maglev\": \"1a98030114cf\"}","created_at":1682258083,"id":"153a480d7bb9d7564147241b330a8667b19c3f9178b8179e64bf57f200654cb0","kind":0,"pubkey":"fb7324a1b807b48756be8df06bd9ccf11741a9678b120e91e044b5137734dcb2","sig":"08c0ffa072fd49f405df467ccab25152a54073fc0639ea0952e1eabff7962e008c54cb8f4d2d55dc4398703df4a5654d2ae3e93f68a801bcbabcdb8050a918ef","tags":[["t","TESTmaglev"],["expiration","1682258683"]]}      
+        {"content":"{\"display_name\": \"maglevclient\", \"uptime\": 103180, \"maglev\": \"1a98030114cf\"}","created_at":1682258083,"id":"153a480d7bb9d7564147241b330a8667b19c3f9178b8179e64bf57f200654cb0","kind":0,"pubkey":"fb7324a1b807b48756be8df06bd9ccf11741a9678b120e91e044b5137734dcb2","sig":"08c0ffa072fd49f405df467ccab25152a54073fc0639ea0952e1eabff7962e008c54cb8f4d2d55dc4398703df4a5654d2ae3e93f68a801bcbabcdb8050a918ef","tags":[["t","TESTmaglev"],["expiration","1682258683"]]}
           "#;
         let event: Event = serde_json::from_str(note)?;
         assert!(event.verify_sign().is_ok());
