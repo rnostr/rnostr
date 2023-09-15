@@ -299,8 +299,9 @@ mod tests {
 
     #[test]
     fn hit() -> Result<()> {
-        let event =
-            Event::from_str(r#"{"kind":1, "id": "", "pubkey": "", "created_at": 1, "sig": ""}"#)?;
+        let event = Event::from_str(
+            r#"{"kind":1, "id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "pubkey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "created_at": 1, "sig": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#,
+        )?;
         let ip = "127.0.0.1".to_owned();
 
         let q = EventQuota {
@@ -325,8 +326,9 @@ mod tests {
         assert!(!q.hit(&event, &ip));
         // kinds
         assert!(q.hit(&event, &"127".to_owned()));
-        let event =
-            Event::from_str(r#"{"kind":101, "id": "", "pubkey": "", "created_at": 1, "sig": ""}"#)?;
+        let event = Event::from_str(
+            r#"{"kind":101, "id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "pubkey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "created_at": 1, "sig": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#,
+        )?;
         assert!(!q.hit(&event, &"127".to_owned()));
         Ok(())
     }

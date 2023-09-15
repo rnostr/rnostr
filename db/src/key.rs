@@ -105,7 +105,7 @@ pub fn u16_to_ver(num: u16) -> Vec<u8> {
 
 // Replaceable Events [NIP-16](https://nips.be/16)
 // Parameterized Replaceable Events [NIP-33](https://nips.be/33)
-pub fn encode_replace_key(kind: u16, pubkey: &Vec<u8>, tags: &[Vec<String>]) -> Option<Vec<u8>> {
+pub fn encode_replace_key(kind: u16, pubkey: &[u8; 32], tags: &[Vec<String>]) -> Option<Vec<u8>> {
     if kind == 0 || kind == 3 || kind == 41 || (10_000..20_000).contains(&kind) {
         let k = u16_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn replace_key() {
         let tags = vec![vec!["d".to_owned(), "m".to_owned()]];
-        let pubkey = vec![1u8; 32];
+        let pubkey = [1u8; 32];
         let time = u64_to_ver(10);
         let empty: Vec<u8> = vec![];
 

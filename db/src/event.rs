@@ -1,6 +1,6 @@
 use crate::error::Error;
 use rkyv::{
-    vec::ArchivedVec, AlignedVec, Archive, Deserialize as RkyvDeserialize,
+    vec::ArchivedVec, AlignedVec, Archive, Archived, Deserialize as RkyvDeserialize,
     Serialize as RkyvSerialize,
 };
 use secp256k1::{schnorr::Signature, KeyPair, Message, XOnlyPublicKey, SECP256K1};
@@ -14,7 +14,7 @@ use std::{
 };
 
 type Tags = Vec<(Vec<u8>, Vec<u8>)>;
-type BuildTags = (Tags, Option<u64>, Option<Vec<u8>>);
+type BuildTags = (Tags, Option<u64>, Option<[u8; 32]>);
 #[derive(
     Serialize,
     Deserialize,
@@ -29,10 +29,10 @@ type BuildTags = (Tags, Option<u64>, Option<Vec<u8>>);
 )]
 pub struct EventIndex {
     #[serde(with = "hex::serde")]
-    id: Vec<u8>,
+    id: [u8; 32],
 
     #[serde(with = "hex::serde")]
-    pubkey: Vec<u8>,
+    pubkey: [u8; 32],
 
     created_at: u64,
 
@@ -46,7 +46,7 @@ pub struct EventIndex {
 
     /// [NIP-26](https://nips.be/26)
     #[serde(skip)]
-    delegator: Option<Vec<u8>>,
+    delegator: Option<[u8; 32]>,
 }
 
 impl EventIndex {
@@ -71,8 +71,8 @@ impl EventIndex {
     }
 
     pub fn new(
-        id: Vec<u8>,
-        pubkey: Vec<u8>,
+        id: [u8; 32],
+        pubkey: [u8; 32],
         created_at: u64,
         kind: u16,
         tags: &Vec<Vec<String>>,
@@ -102,10 +102,8 @@ impl EventIndex {
                             .map_err(|_| Error::Invalid("invalid expiration".to_string()))?,
                     );
                 } else if tag[0] == "delegation" {
-                    let h = hex::decode(&tag[1])?;
-                    if h.len() != 32 {
-                        return Err(Error::Invalid("invalid delegator length".to_string()));
-                    }
+                    let mut h = [0u8; 32];
+                    hex::decode_to_slice(&tag[1], &mut h)?;
                     delegator = Some(h);
                 }
 
@@ -137,11 +135,11 @@ impl EventIndex {
         Ok((t, expiration, delegator))
     }
 
-    pub fn id(&self) -> &Vec<u8> {
+    pub fn id(&self) -> &[u8; 32] {
         &self.id
     }
 
-    pub fn pubkey(&self) -> &Vec<u8> {
+    pub fn pubkey(&self) -> &[u8; 32] {
         &self.pubkey
     }
 
@@ -161,7 +159,7 @@ impl EventIndex {
         self.expiration.as_ref()
     }
 
-    pub fn delegator(&self) -> Option<&Vec<u8>> {
+    pub fn delegator(&self) -> Option<&[u8; 32]> {
         self.delegator.as_ref()
     }
 
@@ -180,10 +178,10 @@ impl EventIndex {
 }
 
 impl ArchivedEventIndex {
-    pub fn id(&self) -> &[u8] {
+    pub fn id(&self) -> &Archived<[u8; 32]> {
         &self.id
     }
-    pub fn pubkey(&self) -> &[u8] {
+    pub fn pubkey(&self) -> &Archived<[u8; 32]> {
         &self.pubkey
     }
 
@@ -203,7 +201,7 @@ impl ArchivedEventIndex {
         self.expiration.as_ref()
     }
 
-    pub fn delegator(&self) -> Option<&ArchivedVec<u8>> {
+    pub fn delegator(&self) -> Option<&Archived<[u8; 32]>> {
         self.delegator.as_ref()
     }
 
@@ -221,12 +219,12 @@ impl ArchivedEventIndex {
     }
 }
 // the shadow event for deserialize
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 struct _Event {
     #[serde(with = "hex::serde")]
-    id: Vec<u8>,
+    id: [u8; 32],
     #[serde(with = "hex::serde")]
-    pubkey: Vec<u8>,
+    pubkey: [u8; 32],
     created_at: u64,
     kind: u16,
     #[serde(default)]
@@ -234,14 +232,14 @@ struct _Event {
     #[serde(default)]
     content: String,
     #[serde(with = "hex::serde")]
-    sig: Vec<u8>,
+    sig: [u8; 64],
     // #[serde(flatten)]
     // index: IndexEvent,
 }
 
 /// The default event document.
 // TODO: validate index tag value length 255
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(try_from = "_Event")]
 pub struct Event {
     #[serde(default)]
@@ -251,7 +249,7 @@ pub struct Event {
     content: String,
 
     #[serde(with = "hex::serde")]
-    sig: Vec<u8>,
+    sig: [u8; 64],
 
     #[serde(flatten)]
     index: EventIndex,
@@ -283,13 +281,13 @@ impl TryFrom<_Event> for Event {
 
 impl Event {
     pub fn new(
-        id: Vec<u8>,
-        pubkey: Vec<u8>,
+        id: [u8; 32],
+        pubkey: [u8; 32],
         created_at: u64,
         kind: u16,
         tags: Vec<Vec<String>>,
         content: String,
-        sig: Vec<u8>,
+        sig: [u8; 64],
     ) -> Result<Self, Error> {
         let index = EventIndex::new(id, pubkey, created_at, kind, &tags)?;
         let event = Self {
@@ -309,21 +307,13 @@ impl Event {
         tags: Vec<Vec<String>>,
         content: String,
     ) -> Result<Self, Error> {
-        let pubkey = XOnlyPublicKey::from_keypair(key_pair)
-            .0
-            .serialize()
-            .to_vec();
+        let pubkey = XOnlyPublicKey::from_keypair(key_pair).0.serialize();
         let id = hash(&pubkey, created_at, kind, &tags, &content);
-        let sig = SECP256K1.sign_schnorr(&Message::from_slice(&id)?, key_pair);
-        Self::new(
-            id,
-            pubkey,
-            created_at,
-            kind,
-            tags,
-            content,
-            sig.as_ref().to_vec(),
-        )
+        let sig = SECP256K1
+            .sign_schnorr(&Message::from_slice(&id)?, key_pair)
+            .as_ref()
+            .clone();
+        Self::new(id, pubkey, created_at, kind, tags, content, sig)
     }
 }
 
@@ -450,7 +440,7 @@ impl Event {
         &self.index
     }
 
-    pub fn id(&self) -> &Vec<u8> {
+    pub fn id(&self) -> &[u8; 32] {
         &self.index.id
     }
 
@@ -458,7 +448,7 @@ impl Event {
         hex::encode(&self.index.id)
     }
 
-    pub fn pubkey(&self) -> &Vec<u8> {
+    pub fn pubkey(&self) -> &[u8; 32] {
         &self.index.pubkey
     }
 
@@ -482,7 +472,7 @@ impl Event {
         &self.content
     }
 
-    pub fn sig(&self) -> &[u8] {
+    pub fn sig(&self) -> &[u8; 64] {
         &self.sig
     }
 }
@@ -500,15 +490,15 @@ fn hash(
     kind: u16,
     tags: &Vec<Vec<String>>,
     content: &String,
-) -> Vec<u8> {
+) -> [u8; 32] {
     let json: Value = json!([0, hex::encode(pubkey), created_at, kind, tags, content]);
     let mut hasher = Sha256::new();
     hasher.update(json.to_string());
-    hasher.finalize().to_vec()
+    hasher.finalize().into()
 }
 
 impl Event {
-    pub fn hash(&self) -> Vec<u8> {
+    pub fn hash(&self) -> [u8; 32] {
         hash(
             self.pubkey(),
             self.created_at(),
@@ -802,7 +792,7 @@ mod tests {
         assert!(event.verify_id().is_ok());
         assert!(event.index().is_expired(now()));
 
-        let event = Event::new(vec![], vec![], 10, 1, vec![], "".to_string(), vec![])?;
+        let event = Event::new([0; 32], [0; 32], 10, 1, vec![], "".to_string(), [0; 64])?;
         assert!(event.verify_time(10, 1, 1).is_ok());
         assert!(event.verify_time(20, 1, 1).is_err());
         assert!(event.verify_time(5, 1, 1).is_err());
