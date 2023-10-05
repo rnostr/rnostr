@@ -355,8 +355,8 @@ pub struct Db {
     inner: Arc<DbInner>,
 }
 
-unsafe impl Send for Db {}
-unsafe impl Sync for Db {}
+unsafe impl Send for DbInner {}
+unsafe impl Sync for DbInner {}
 
 impl Db {
     pub fn writer(&self) -> Result<Writer> {

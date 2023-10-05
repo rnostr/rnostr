@@ -309,10 +309,9 @@ impl Event {
     ) -> Result<Self, Error> {
         let pubkey = XOnlyPublicKey::from_keypair(key_pair).0.serialize();
         let id = hash(&pubkey, created_at, kind, &tags, &content);
-        let sig = SECP256K1
+        let sig = *SECP256K1
             .sign_schnorr(&Message::from_slice(&id)?, key_pair)
-            .as_ref()
-            .clone();
+            .as_ref();
         Self::new(id, pubkey, created_at, kind, tags, content, sig)
     }
 }
@@ -445,7 +444,7 @@ impl Event {
     }
 
     pub fn id_str(&self) -> String {
-        hex::encode(&self.index.id)
+        hex::encode(self.index.id)
     }
 
     pub fn pubkey(&self) -> &[u8; 32] {
@@ -453,7 +452,7 @@ impl Event {
     }
 
     pub fn pubkey_str(&self) -> String {
-        hex::encode(&self.index.pubkey)
+        hex::encode(self.index.pubkey)
     }
 
     pub fn created_at(&self) -> u64 {
