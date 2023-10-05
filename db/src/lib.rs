@@ -9,7 +9,7 @@ pub use secp256k1;
 
 pub use {
     db::CheckEventResult, db::Db, db::Iter, error::Error, event::now, event::ArchivedEventIndex,
-    event::Event, event::EventIndex, event::FromEventData, filter::Filter, filter::TagList,
+    event::Event, event::EventIndex, event::FromEventData, filter::Filter, filter::SortList,
 };
 
 pub use nostr_kv as kv;

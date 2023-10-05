@@ -486,7 +486,7 @@ pub fn test_events_delegator() -> Result<()> {
 
     db.batch_put(&events)?;
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(1))]),
+        authors: Some(vec![hex::encode(author(1))].into()),
         ..Default::default()
     };
     let e1 = all(&db, &filter)?;
@@ -494,7 +494,7 @@ pub fn test_events_delegator() -> Result<()> {
 
     // query by tag
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(1))]),
+        authors: Some(vec![hex::encode(author(1))].into()),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
@@ -517,7 +517,7 @@ pub fn test_events_delegator() -> Result<()> {
 
     db.batch_put(&events)?;
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(1))]),
+        authors: Some(vec![hex::encode(author(1))].into()),
         ..Default::default()
     };
     let e1 = all(&db, &filter)?;
@@ -636,7 +636,7 @@ pub fn test_query_authors_by_prefix() -> Result<()> {
 
     // prefix break time range
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(250))[0..63].to_string()]),
+        authors: Some(vec![hex::encode(author(250))[0..63].to_string()].into()),
         since: Some(2),
         until: Some(4),
         desc: true,
@@ -691,8 +691,8 @@ pub fn test_query_author_kinds() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(20))]),
-        kinds: Some(vec![1000, 1001]),
+        authors: Some(vec![hex::encode(author(20))].into()),
+        kinds: Some(vec![1000, 1001].into()),
         desc: false,
         ..Default::default()
     };
@@ -707,8 +707,8 @@ pub fn test_query_author_kinds() -> Result<()> {
     }
     // rev
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(20))]),
-        kinds: Some(vec![1000, 1001]),
+        authors: Some(vec![hex::encode(author(20))].into()),
+        kinds: Some(vec![1000, 1001].into()),
         desc: true,
         ..Default::default()
     };
@@ -719,8 +719,8 @@ pub fn test_query_author_kinds() -> Result<()> {
     }
     // prefix
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(20))[0..63].to_string()]),
-        kinds: Some(vec![1000, 1001]),
+        authors: Some(vec![hex::encode(author(20))[0..63].to_string()].into()),
+        kinds: Some(vec![1000, 1001].into()),
         desc: true,
         ..Default::default()
     };
@@ -766,7 +766,7 @@ pub fn test_query_authors() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(10))]),
+        authors: Some(vec![hex::encode(author(10))].into()),
         desc: false,
         ..Default::default()
     };
@@ -774,12 +774,12 @@ pub fn test_query_authors() -> Result<()> {
     assert_eq!(e1.0.len(), PER_NUM as usize);
 
     let filter = Filter {
-        authors: Some(vec![hex::encode(author(20))]),
+        authors: Some(vec![hex::encode(author(20))].into()),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag1".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3]),
+        kinds: Some(vec![1, 2, 3].into()),
         desc: true,
         ..Default::default()
     };
@@ -967,7 +967,7 @@ pub fn test_query_tag() -> Result<()> {
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3]),
+        kinds: Some(vec![1, 2, 3].into()),
         desc: true,
         ..Default::default()
     };
@@ -979,7 +979,7 @@ pub fn test_query_tag() -> Result<()> {
             "t".to_string().into_bytes(),
             vec!["query tag1".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3]),
+        kinds: Some(vec![1, 2, 3].into()),
         desc: true,
         ..Default::default()
     };
@@ -991,8 +991,8 @@ pub fn test_query_tag() -> Result<()> {
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3]),
-        authors: Some(vec![hex::encode(author(20))]),
+        kinds: Some(vec![1, 2, 3].into()),
+        authors: Some(vec![hex::encode(author(20))].into()),
         desc: true,
         ..Default::default()
     };
@@ -1054,7 +1054,7 @@ pub fn test_query_kinds() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        kinds: Some(vec![1001, 1002, 1003]),
+        kinds: Some(vec![1001, 1002, 1003].into()),
         desc: false,
         ..Default::default()
     };
@@ -1064,7 +1064,7 @@ pub fn test_query_kinds() -> Result<()> {
     assert_eq!(e1.0[1].kind(), 1001);
 
     let filter = Filter {
-        kinds: Some(vec![1000, 1001, 1002]),
+        kinds: Some(vec![1000, 1001, 1002].into()),
         desc: true,
         ..Default::default()
     };
@@ -1114,7 +1114,7 @@ pub fn test_query_ids() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        ids: Some(vec![hex::encode(id(prefix, 0))]),
+        ids: Some(vec![hex::encode(id(prefix, 0))].into()),
         desc: false,
         ..Default::default()
     };
@@ -1123,11 +1123,14 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0[0].id(), &id(prefix, 0));
 
     let filter = Filter {
-        ids: Some(vec![
-            hex::encode(id(prefix, 2)),
-            hex::encode(id(prefix, 4)),
-            hex::encode(id(prefix, 3)),
-        ]),
+        ids: Some(
+            vec![
+                hex::encode(id(prefix, 2)),
+                hex::encode(id(prefix, 4)),
+                hex::encode(id(prefix, 3)),
+            ]
+            .into(),
+        ),
         desc: false,
         ..Default::default()
     };
@@ -1139,11 +1142,14 @@ pub fn test_query_ids() -> Result<()> {
 
     // desc
     let filter = Filter {
-        ids: Some(vec![
-            hex::encode(id(prefix, 2)),
-            hex::encode(id(prefix, 4)),
-            hex::encode(id(prefix, 3)),
-        ]),
+        ids: Some(
+            vec![
+                hex::encode(id(prefix, 2)),
+                hex::encode(id(prefix, 4)),
+                hex::encode(id(prefix, 3)),
+            ]
+            .into(),
+        ),
         desc: true,
         ..Default::default()
     };
@@ -1155,11 +1161,14 @@ pub fn test_query_ids() -> Result<()> {
 
     // desc
     let filter = Filter {
-        ids: Some(vec![
-            hex::encode(id(prefix, 2)),
-            hex::encode(id(prefix, 4)),
-            hex::encode(id(prefix, 3)),
-        ]),
+        ids: Some(
+            vec![
+                hex::encode(id(prefix, 2)),
+                hex::encode(id(prefix, 4)),
+                hex::encode(id(prefix, 3)),
+            ]
+            .into(),
+        ),
         desc: true,
         ..Default::default()
     };
@@ -1171,7 +1180,7 @@ pub fn test_query_ids() -> Result<()> {
 
     // prefix
     let filter = Filter {
-        ids: Some(vec![hex::encode(id(prefix, 0))[0..62].to_string()]),
+        ids: Some(vec![hex::encode(id(prefix, 0))[0..62].to_string()].into()),
         desc: true,
         ..Default::default()
     };
@@ -1180,7 +1189,7 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0[0].id(), &id(prefix, 29));
 
     let filter = Filter {
-        ids: Some(vec![hex::encode(id(prefix, 0))[0..62].to_string()]),
+        ids: Some(vec![hex::encode(id(prefix, 0))[0..62].to_string()].into()),
         desc: false,
         ..Default::default()
     };
@@ -1189,7 +1198,7 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0[0].id(), &id(prefix, 0));
 
     let filter = Filter {
-        ids: Some(vec![hex::encode(id(prefix, 0))[0..63].to_string()]),
+        ids: Some(vec![hex::encode(id(prefix, 0))[0..63].to_string()].into()),
         desc: true,
         ..Default::default()
     };
@@ -1198,17 +1207,20 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0[0].id(), &id(prefix, 15));
 
     let filter = Filter {
-        ids: Some(vec![
-            hex::encode(id(10, 1)),
-            hex::encode(id(10, 2)),
-            hex::encode(id(10, 3)),
-        ]),
-        authors: Some(vec![hex::encode(author(30))]),
+        ids: Some(
+            vec![
+                hex::encode(id(10, 1)),
+                hex::encode(id(10, 2)),
+                hex::encode(id(10, 3)),
+            ]
+            .into(),
+        ),
+        authors: Some(vec![hex::encode(author(30))].into()),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3, 4]),
+        kinds: Some(vec![1, 2, 3, 4].into()),
         desc: true,
         ..Default::default()
     };
@@ -1216,17 +1228,20 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0.len(), 3);
 
     let filter = Filter {
-        ids: Some(vec![
-            hex::encode(id(10, 1)),
-            hex::encode(id(10, 2)),
-            hex::encode(id(10, 3)),
-        ]),
-        authors: Some(vec![hex::encode(author(20))]),
+        ids: Some(
+            vec![
+                hex::encode(id(10, 1)),
+                hex::encode(id(10, 2)),
+                hex::encode(id(10, 3)),
+            ]
+            .into(),
+        ),
+        authors: Some(vec![hex::encode(author(20))].into()),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3, 4]),
+        kinds: Some(vec![1, 2, 3, 4].into()),
         desc: true,
         ..Default::default()
     };
@@ -1308,17 +1323,20 @@ pub fn test_query_search() -> Result<()> {
     assert_eq!(e1.0.len(), PER_NUM as usize);
 
     let mut filter = Filter {
-        ids: Some(vec![
-            hex::encode(id(10, 1)),
-            hex::encode(id(10, 2)),
-            hex::encode(id(10, 3)),
-        ]),
-        authors: Some(vec![hex::encode(author(1))]),
+        ids: Some(
+            vec![
+                hex::encode(id(10, 1)),
+                hex::encode(id(10, 2)),
+                hex::encode(id(10, 3)),
+            ]
+            .into(),
+        ),
+        authors: Some(vec![hex::encode(author(1))].into()),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
         )]),
-        kinds: Some(vec![1, 2, 3, 4]),
+        kinds: Some(vec![1, 2, 3, 4].into()),
         search: Some("my note".to_string()),
         desc: false,
         ..Default::default()

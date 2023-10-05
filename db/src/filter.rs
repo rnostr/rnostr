@@ -1,30 +1,36 @@
 use crate::{error::Error, ArchivedEventIndex, EventIndex};
 use serde::Deserialize;
 use serde_json::Value;
+use std::cmp::{Ord, Ordering};
 use std::{collections::HashMap, ops::Deref, str::FromStr};
 
-/// The tag list contains unduplicated and sorted items
+/// The sort list contains unduplicated and sorted items
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub struct TagList(Vec<Vec<u8>>);
+pub struct SortList<T>(Vec<T>);
 
-impl From<Vec<Vec<u8>>> for TagList {
-    fn from(mut value: Vec<Vec<u8>>) -> Self {
+impl<T: Ord> From<Vec<T>> for SortList<T> {
+    fn from(mut value: Vec<T>) -> Self {
         value.sort();
         value.dedup();
         Self(value)
     }
 }
 
-impl TagList {
-    pub fn contains<I: AsRef<[u8]>>(&self, item: I) -> bool {
-        self.binary_search_by(|p| p.deref().cmp(item.as_ref()))
-            .is_ok()
-        // self.0.deref().binary_search(item.as_ref()).is_ok()
+impl<T: Ord> SortList<T> {
+    pub fn contains(&self, item: &T) -> bool {
+        self.binary_search(item).is_ok()
     }
 }
 
-impl Deref for TagList {
-    type Target = Vec<Vec<u8>>;
+impl<T: Ord + AsRef<[u8]>> SortList<T> {
+    pub fn contains2<I: AsRef<[u8]>>(&self, item: I) -> bool {
+        self.binary_search_by(|p| p.as_ref().cmp(item.as_ref()))
+            .is_ok()
+    }
+}
+
+impl<T> Deref for SortList<T> {
+    type Target = Vec<T>;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -39,13 +45,13 @@ impl Deref for TagList {
 #[serde(try_from = "_Filter")]
 pub struct Filter {
     /// a list of event ids or prefixes
-    pub ids: Option<Vec<String>>,
+    pub ids: Option<SortList<String>>,
 
     /// a list of pubkeys or prefixes, the pubkey of an event must be one of these
-    pub authors: Option<Vec<String>>,
+    pub authors: Option<SortList<String>>,
 
     /// a list of a kind numbers
-    pub kinds: Option<Vec<u16>>,
+    pub kinds: Option<SortList<u16>>,
 
     pub since: Option<u64>,
     pub until: Option<u64>,
@@ -56,7 +62,7 @@ pub struct Filter {
 
     /// tags starts with "#", key tag length 1
     ///
-    pub tags: HashMap<Vec<u8>, TagList>,
+    pub tags: HashMap<Vec<u8>, SortList<Vec<u8>>>,
 
     /// Query by time descending order
     pub desc: bool,
@@ -129,8 +135,8 @@ impl TryFrom<_Filter> for Filter {
             }
         }
 
-        let ids = clean_empty(filter.ids);
-        let authors = clean_empty(filter.authors);
+        let ids = clean_sort_list(filter.ids);
+        let authors = clean_sort_list(filter.authors);
         // let empty = "".to_string();
         // if let Some(a) = ids.as_ref() {
         //     if a.contains(&empty) {
@@ -144,7 +150,7 @@ impl TryFrom<_Filter> for Filter {
         let f = Filter {
             ids,
             authors,
-            kinds: clean_empty(filter.kinds),
+            kinds: clean_sort_list(filter.kinds),
             since: filter.since,
             until: filter.until,
             limit: filter.limit,
@@ -158,8 +164,10 @@ impl TryFrom<_Filter> for Filter {
     }
 }
 
-fn clean_empty<T>(list: Option<Vec<T>>) -> Option<Vec<T>> {
-    list.filter(|li| !li.is_empty())
+// clean empty
+// sort list for binary search
+fn clean_sort_list<T: std::cmp::Ord>(list: Option<Vec<T>>) -> Option<SortList<T>> {
+    list.filter(|li| !li.is_empty()).map(SortList::from)
 }
 
 impl Filter {
@@ -201,12 +209,12 @@ impl Filter {
         self.tags = t;
     }
 
-    pub fn match_id<K: AsRef<[u8]>>(ids: Option<&Vec<String>>, id: K) -> bool {
+    pub fn match_id<K: AsRef<[u8]>>(ids: Option<&SortList<String>>, id: K) -> bool {
         ids.map_or(true, |ids| match_prefix(ids, id.as_ref()))
     }
 
     pub fn match_author<P: AsRef<[u8]>, D: AsRef<[u8]>>(
-        authors: Option<&Vec<String>>,
+        authors: Option<&SortList<String>>,
         pubkey: P,
         delegator: Option<D>,
     ) -> bool {
@@ -221,12 +229,12 @@ impl Filter {
         })
     }
 
-    pub fn match_kind(kinds: Option<&Vec<u16>>, kind: u16) -> bool {
+    pub fn match_kind(kinds: Option<&SortList<u16>>, kind: u16) -> bool {
         kinds.map_or(true, |ks| ks.contains(&kind))
     }
 
     pub fn match_tag<V: AsRef<[u8]>, I: AsRef<[(V, V)]>>(
-        tags: &HashMap<Vec<u8>, TagList>,
+        tags: &HashMap<Vec<u8>, SortList<Vec<u8>>>,
         event_tags: I,
     ) -> bool {
         // empty tags
@@ -251,14 +259,14 @@ impl Filter {
     fn tag_contains<V: AsRef<[u8]>, I: AsRef<[(V, V)]>>(
         tags: I,
         name: &[u8],
-        list: &TagList,
+        list: &SortList<Vec<u8>>,
     ) -> bool {
         let tags = tags.as_ref();
         if tags.is_empty() {
             return false;
         }
         for tag in tags {
-            if tag.0.as_ref() == name && list.contains(tag.1.as_ref()) {
+            if tag.0.as_ref() == name && list.contains2(tag.1.as_ref()) {
                 return true;
             }
         }
@@ -290,17 +298,20 @@ impl Filter {
     }
 }
 
-fn match_prefix(prefixes: &[String], target: &[u8]) -> bool {
+fn match_prefix(prefixes: &SortList<String>, target: &[u8]) -> bool {
     if prefixes.is_empty() {
         return true;
     }
     let target = hex::encode(target);
-    for prefix in prefixes {
-        if target.starts_with(prefix) {
-            return true;
-        }
-    }
-    false
+    prefixes
+        .binary_search_by(|p| {
+            if target.starts_with(p) {
+                Ordering::Equal
+            } else {
+                p.cmp(&target)
+            }
+        })
+        .is_ok()
 }
 
 #[cfg(test)]
@@ -308,7 +319,7 @@ mod tests {
     use std::{collections::HashMap, str::FromStr};
 
     use super::Filter;
-    use crate::{filter::TagList, ArchivedEventIndex, Event, EventIndex};
+    use crate::{filter::SortList, ArchivedEventIndex, Event, EventIndex};
     use anyhow::Result;
 
     #[test]
@@ -324,7 +335,7 @@ mod tests {
         {
             "ids": ["ab", "cd", "12"],
             "authors": ["ab", "cd", "12"],
-            "kinds": [1, 2],
+            "kinds": [2, 1],
             "until": 5,
             "since": 3,
             "limit": 6,
@@ -337,15 +348,15 @@ mod tests {
           }
         "###;
         let mut filter: Filter = serde_json::from_str(note)?;
-        let li = vec!["ab".to_string(), "cd".to_string(), "12".to_string()];
-        let tags: TagList = li
+        let li = SortList::from(vec!["12".to_string(), "ab".to_string(), "cd".to_string()]);
+        let tags: SortList<Vec<u8>> = li
             .iter()
             .map(|s| s.as_bytes().to_vec())
             .collect::<Vec<_>>()
             .into();
         assert_eq!(&filter.ids.as_ref(), &Some(&li));
         assert_eq!(&filter.authors.as_ref(), &Some(&li));
-        assert_eq!(&filter.kinds, &Some(vec![1, 2]));
+        assert_eq!(&filter.kinds, &Some(SortList::from(vec![1, 2])));
         assert_eq!(filter.until, Some(5));
         assert_eq!(filter.since, Some(3));
         assert_eq!(filter.limit, Some(6));
@@ -443,13 +454,13 @@ mod tests {
             .tags
             .get(&b"e".to_vec())
             .unwrap()
-            .contains(vec![0u8; 32]));
+            .contains(&vec![0u8; 32]));
         let filter = Filter::from_str(note)?;
         assert!(filter
             .tags
             .get(&b"p".to_vec())
             .unwrap()
-            .contains(vec![0u8; 32]));
+            .contains(&vec![0u8; 32]));
         Ok(())
     }
 
