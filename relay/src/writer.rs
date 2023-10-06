@@ -13,6 +13,7 @@ use tracing::{debug, error, info};
 
 const WRITE_INTERVAL_MS: u64 = 100;
 const DEL_INTERVAL_SECONDS: u64 = 60;
+const EPHEMERAL_EXPIRED_SECONDS: u64 = 60 * 5;
 
 pub struct Writer {
     pub db: Arc<Db>,
@@ -94,9 +95,26 @@ impl Writer {
         Ok(())
     }
 
-    pub fn do_del_expired(&self) {
+    pub fn del_ephemeral(&self) -> Result<()> {
+        let reader = self.db.reader()?;
+        let iter = self
+            .db
+            .iter_ephemeral::<Vec<u8>, _>(&reader, Some(now() - EPHEMERAL_EXPIRED_SECONDS))?;
+        let mut ids = vec![];
+        for id in iter {
+            let id = id?;
+            ids.push(id);
+        }
+        self.db.batch_del(ids)?;
+        Ok(())
+    }
+
+    pub fn do_del(&self) {
         if let Err(err) = self.del_expired() {
             error!(error = err.to_string(), "delete expired events error");
+        }
+        if let Err(err) = self.del_ephemeral() {
+            error!(error = err.to_string(), "delete ephemeral events error");
         }
     }
 }
@@ -112,11 +130,11 @@ impl Actor for Writer {
                 act.do_write();
             },
         );
-        // delete expired events every minute
+        // delete expired and ephemeral events
         ctx.run_interval(
             Duration::from_secs(self.del_interval_seconds),
             |act, _ctx| {
-                act.do_del_expired();
+                act.do_del();
             },
         );
     }
@@ -143,7 +161,7 @@ mod tests {
     use crate::temp_data_path;
     use actix_rt::time::sleep;
     use anyhow::Result;
-    use nostr_db::Event;
+    use nostr_db::{Event, Filter};
     use parking_lot::RwLock;
 
     #[derive(Default)]
@@ -180,7 +198,10 @@ mod tests {
         let receiver = receiver.start();
         let addr = receiver.recipient();
 
-        let writer = Writer::new(Arc::clone(&db), addr.clone()).start();
+        let mut writer = Writer::new(Arc::clone(&db), addr.clone());
+        writer.del_interval_seconds = 1;
+        writer.write_interval_ms = 100;
+        let writer = writer.start();
 
         for i in 0..4 {
             writer
@@ -191,9 +212,85 @@ mod tests {
                 .await?;
         }
 
-        sleep(Duration::from_millis(WRITE_INTERVAL_MS * 3)).await;
+        // ephemeral
+        writer
+          .send(WriteEvent {
+              id: 100,
+              event: Event::from_str(r#"
+              {
+                  "content": "Good morning everyone 😃",
+                  "created_at": 10,
+                  "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d71",
+                  "kind": 20001,
+                  "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+                  "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+                  "tags": [["t", "nostr"]]
+                }
+              "#)?,
+          })
+          .await?;
+        // ephemeral
+        writer
+          .send(WriteEvent {
+              id: 100,
+              event: Event::from_str(&format!(r#"
+              {{
+                  "content": "Good morning everyone 😃",
+                  "created_at": {},
+                  "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d72",
+                  "kind": 20001,
+                  "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+                  "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+                  "tags": [["t", "nostr"]]
+                }}
+              "#, now()))?,
+          })
+          .await?;
+
+        // expiration
+        writer
+          .send(WriteEvent {
+              id: 100,
+              event: Event::from_str(r#"
+              {
+                  "content": "Good morning everyone 😃",
+                  "created_at": 10,
+                  "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d73",
+                  "kind": 1,
+                  "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+                  "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+                  "tags": [["t", "nostr"], ["expiration", "10"]]
+                }
+              "#)?,
+          })
+          .await?;
+
+        sleep(Duration::from_millis(200)).await;
         let r = messages.read();
-        assert_eq!(r.len(), 4);
+        assert_eq!(r.len(), 7);
+        {
+            let txn = db.reader()?;
+            let iter = db.iter::<Event, _>(
+                &txn,
+                &Filter {
+                    ..Default::default()
+                },
+            )?;
+            assert_eq!(iter.count(), 4);
+        }
+
+        sleep(Duration::from_millis(1100)).await;
+        {
+            let txn = db.reader()?;
+            let iter = db.iter::<Event, _>(
+                &txn,
+                &Filter {
+                    ..Default::default()
+                },
+            )?;
+            assert_eq!(iter.count(), 2);
+        }
+
         Ok(())
     }
 }

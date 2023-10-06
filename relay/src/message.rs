@@ -12,21 +12,21 @@ use std::{fmt, marker::PhantomData};
 use crate::{setting::Limitation, Error};
 
 /// New session is created
-#[derive(Message)]
+#[derive(Message, Clone, Debug)]
 #[rtype(usize)]
 pub struct Connect {
     pub addr: Recipient<OutgoingMessage>,
 }
 
 /// Session is disconnected
-#[derive(Message)]
+#[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct Disconnect {
     pub id: usize,
 }
 
 /// Message from client
-#[derive(Message)]
+#[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct ClientMessage {
     /// Id of the client session

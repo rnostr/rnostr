@@ -99,14 +99,9 @@ impl Handler<ClientMessage> for Server {
     fn handle(&mut self, msg: ClientMessage, ctx: &mut Self::Context) {
         match msg.msg {
             IncomingMessage::Event(event) => {
-                // don't save ephemeral event
-                if event.index().is_ephemeral() {
-                    let event_id = event.id_str();
-                    self.subscriber.do_send(Dispatch { id: msg.id, event });
-                    self.send_to_client(msg.id, OutgoingMessage::ok(&event_id, true, ""));
-                } else {
-                    self.writer.do_send(WriteEvent { id: msg.id, event })
-                }
+                // save all event
+                // save ephemeral for check duplicate, disconnection recovery, will be deleted
+                self.writer.do_send(WriteEvent { id: msg.id, event })
             }
             IncomingMessage::Close(id) => self.subscriber.do_send(Unsubscribe {
                 id: msg.id,
@@ -240,7 +235,7 @@ mod tests {
     }
 
     #[actix_rt::test]
-    async fn put_get() -> Result<()> {
+    async fn message() -> Result<()> {
         let db = Arc::new(Db::open(temp_data_path("server")?)?);
         let note = r#"
         {
@@ -248,6 +243,17 @@ mod tests {
             "created_at": 1680690006,
             "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d",
             "kind": 1,
+            "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+            "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+            "tags": [["t", "nostr"]]
+          }
+        "#;
+        let ephemeral_note = r#"
+        {
+            "content": "Good morning everyone 😃",
+            "created_at": 1680690006,
+            "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d78",
+            "kind": 20000,
             "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
             "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
             "tags": [["t", "nostr"]]
@@ -297,15 +303,54 @@ mod tests {
             let text = format!(r#"["EVENT", {}]"#, note);
             let msg = serde_json::from_str::<IncomingMessage>(&text)?;
             let client_msg = ClientMessage { id, text, msg };
-            server.send(client_msg).await?;
+            server.send(client_msg.clone()).await?;
             sleep(Duration::from_millis(200)).await;
             {
                 let mut w = messages.write();
                 assert_eq!(w.len(), 2);
                 assert!(w.get(0).unwrap().0.contains("OK"));
+                // subscription message
                 assert!(w.get(1).unwrap().0.contains("EVENT"));
                 w.clear();
             }
+            // repeat write
+            server.send(client_msg.clone()).await?;
+            sleep(Duration::from_millis(200)).await;
+            {
+                let mut w = messages.write();
+                assert_eq!(w.len(), 1);
+                assert!(w.get(0).unwrap().0.contains("OK"));
+                // No subscription message because the message is duplicated
+                w.clear();
+            }
+
+            // ephemeral event
+            {
+                let text = format!(r#"["EVENT", {}]"#, ephemeral_note);
+                let msg = serde_json::from_str::<IncomingMessage>(&text)?;
+                let client_msg = ClientMessage { id, text, msg };
+                server.send(client_msg.clone()).await?;
+                sleep(Duration::from_millis(200)).await;
+                {
+                    let mut w = messages.write();
+                    assert_eq!(w.len(), 2);
+                    assert!(w.get(0).unwrap().0.contains("OK"));
+                    // subscription message
+                    assert!(w.get(1).unwrap().0.contains("EVENT"));
+                    w.clear();
+                }
+                // repeat
+                server.send(client_msg.clone()).await?;
+                sleep(Duration::from_millis(200)).await;
+                {
+                    let mut w = messages.write();
+                    assert_eq!(w.len(), 1);
+                    assert!(w.get(0).unwrap().0.contains("OK"));
+                    // No subscription message because the message is duplicated
+                    w.clear();
+                }
+            }
+
             // unsubscribe
 
             let text = r#"["CLOSE", "1"]"#.to_owned();
@@ -330,9 +375,10 @@ mod tests {
             sleep(Duration::from_millis(50)).await;
             {
                 let mut w = messages.write();
-                assert_eq!(w.len(), 2);
+                assert_eq!(w.len(), 3);
                 assert!(w.get(0).unwrap().0.contains("EVENT"));
-                assert!(w.get(1).unwrap().0.contains("EOSE"));
+                assert!(w.get(1).unwrap().0.contains("EVENT"));
+                assert!(w.get(2).unwrap().0.contains("EOSE"));
                 w.clear();
             }
         }
