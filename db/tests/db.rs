@@ -1406,3 +1406,85 @@ pub fn test_query_scan_limit_time() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+pub fn test_events_ephemeral() -> Result<()> {
+    let db = create_db("test_events_ephemeral")?;
+    let prefix = 0;
+    let events: Vec<Event> = vec![
+        MyEvent {
+            id: id(prefix, 1),
+            pubkey: author(1),
+            kind: 20000,
+            created_at: 10,
+            ..Default::default()
+        }
+        .into(),
+        MyEvent {
+            id: id(prefix, 2),
+            pubkey: author(1),
+            kind: 20000,
+            created_at: 20,
+            ..Default::default()
+        }
+        .into(),
+        MyEvent {
+            id: id(prefix, 3),
+            pubkey: author(1),
+            kind: 20001,
+            created_at: 10,
+            ..Default::default()
+        }
+        .into(),
+        MyEvent {
+            id: id(prefix, 4),
+            pubkey: author(1),
+            kind: 20001,
+            created_at: 20,
+            ..Default::default()
+        }
+        .into(),
+        MyEvent {
+            id: id(prefix, 5),
+            pubkey: author(1),
+            kind: 30000,
+            created_at: 1,
+            ..Default::default()
+        }
+        .into(),
+    ];
+    db.batch_put(&events)?;
+
+    {
+        let reader = db.reader()?;
+        let mut iter = db.iter_ephemeral::<Event, _>(&reader, Some(10))?;
+        let e1 = iter.next().unwrap()?;
+        assert_eq!(e1.id(), &id(prefix, 1));
+        let e1 = iter.next().unwrap()?;
+        assert_eq!(e1.id(), &id(prefix, 3));
+        assert!(iter.next().is_none());
+    }
+    {
+        let reader = db.reader()?;
+        let iter = db.iter_ephemeral::<Event, _>(&reader, Some(20))?;
+        assert_eq!(iter.count(), 4);
+    }
+    {
+        let reader = db.reader()?;
+        let iter = db.iter_ephemeral::<Event, _>(&reader, Some(15))?;
+        assert_eq!(iter.count(), 2);
+    }
+    {
+        let reader = db.reader()?;
+        // del
+        let iter = db.iter_ephemeral::<Event, _>(&reader, Some(10))?;
+        let events = iter.map(|e| e.unwrap()).collect::<Vec<_>>();
+        db.batch_del(events.iter().map(|e| e.id()))?;
+    }
+    {
+        let reader = db.reader()?;
+        let mut iter = db.iter_ephemeral::<Event, _>(&reader, Some(10))?;
+        assert!(iter.next().is_none());
+    }
+    Ok(())
+}

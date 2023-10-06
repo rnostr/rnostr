@@ -582,6 +582,7 @@ impl Db {
         Ok(())
     }
 
+    /// iter events by filter
     pub fn iter<'txn, J: FromEventData, T: Transaction>(
         &self,
         txn: &'txn T,
@@ -624,6 +625,7 @@ impl Db {
         }
     }
 
+    /// iter expired events
     pub fn iter_expiration<'txn, J: FromEventData, T: Transaction>(
         &self,
         txn: &'txn T,
@@ -635,6 +637,43 @@ impl Db {
             ..Default::default()
         };
         Iter::new_time(self, txn, &filter, &self.t_expiration, MatchIndex::None)
+    }
+
+    /// iter ephemeral events
+    pub fn iter_ephemeral<'txn, J: FromEventData, T: Transaction>(
+        &self,
+        txn: &'txn T,
+        until: Option<u64>,
+    ) -> Result<Iter<'txn, T, J>> {
+        let filter = Filter {
+            desc: false,
+            until,
+            ..Default::default()
+        };
+        let mut group = Group::new(filter.desc, false, false);
+        let prefix = u16_to_ver(20000);
+        let end = u16_to_ver(30000);
+
+        let iter = create_iter(txn, &self.t_kind, &prefix, filter.desc);
+        let scanner = Scanner::new(
+            iter,
+            vec![],
+            prefix,
+            filter.desc,
+            filter.since,
+            filter.until,
+            Box::new(move |_s, r| {
+                let k = r.0;
+                let e: &[u8] = end.as_ref();
+                Ok(if k < e {
+                    MatchResult::Found(IndexKey::from(k, r.1)?)
+                } else {
+                    MatchResult::Stop
+                })
+            }),
+        );
+        group.add(Box::new(scanner))?;
+        Iter::new(self, txn, &filter, group, MatchIndex::None)
     }
 }
 
