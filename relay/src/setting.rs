@@ -252,10 +252,12 @@ impl SettingWrapper {
         let mut watcher = RecommendedWatcher::new(
             move |result: Result<Event, notify::Error>| match result {
                 Ok(event) => {
-                    // println!("event: {:?}", event);
-                    if matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)))
-                        && event.paths.contains(&c_file)
-                    {
+                    #[cfg(target_os = "windows")]
+                    // There is no distinction between data writes or metadata writes. Both of these are represented by Modify(Any).
+                    let is_modify = matches!(event.kind, EventKind::Modify(ModifyKind::Any));
+                    #[cfg(not(target_os = "windows"))]
+                    let is_modify = matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)));
+                    if is_modify && event.paths.contains(&c_file) {
                         match c_setting.reload(&c_file, env_prefix.clone()) {
                             Ok(_) => {
                                 info!("Reload config success {:?}", c_file);
@@ -523,7 +525,7 @@ mod tests {
     name = "nostr"
     "#,
         )?;
-        sleep(Duration::from_millis(300));
+        sleep(Duration::from_secs(1));
         // println!("read {:?} {:?}", setting.read(), file);
         {
             let r = setting.read();
