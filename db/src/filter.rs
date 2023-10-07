@@ -1,7 +1,7 @@
 use crate::{error::Error, ArchivedEventIndex, EventIndex};
 use serde::Deserialize;
 use serde_json::Value;
-use std::cmp::{Ord, Ordering};
+use std::cmp::Ord;
 use std::{collections::HashMap, ops::Deref, str::FromStr};
 
 /// The sort list contains unduplicated and sorted items
@@ -44,11 +44,11 @@ impl<T> Deref for SortList<T> {
 #[derive(PartialEq, Eq, Debug, Clone, Default, Deserialize)]
 #[serde(try_from = "_Filter")]
 pub struct Filter {
-    /// a list of event ids or prefixes
-    pub ids: SortList<String>,
+    /// a list of event ids
+    pub ids: SortList<[u8; 32]>,
 
-    /// a list of pubkeys or prefixes, the pubkey of an event must be one of these
-    pub authors: SortList<String>,
+    /// a list of pubkeys, the pubkey of an event must be one of these
+    pub authors: SortList<[u8; 32]>,
 
     /// a list of a kind numbers
     pub kinds: SortList<u16>,
@@ -81,8 +81,8 @@ impl FromStr for Filter {
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct _Filter {
-    pub ids: Vec<String>,
-    pub authors: Vec<String>,
+    pub ids: Vec<_HexString>,
+    pub authors: Vec<_HexString>,
     pub kinds: Vec<u16>,
     pub since: Option<u64>,
     pub until: Option<u64>,
@@ -91,6 +91,13 @@ struct _Filter {
     pub search: Option<String>,
     #[serde(flatten)]
     pub tags: HashMap<String, Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct _HexString {
+    #[serde(with = "hex::serde")]
+    hex: [u8; 32],
 }
 
 impl TryFrom<_Filter> for Filter {
@@ -137,8 +144,18 @@ impl TryFrom<_Filter> for Filter {
         }
 
         let f = Filter {
-            ids: filter.ids.into(),
-            authors: filter.authors.into(),
+            ids: filter
+                .ids
+                .into_iter()
+                .map(|s| s.hex)
+                .collect::<Vec<_>>()
+                .into(),
+            authors: filter
+                .authors
+                .into_iter()
+                .map(|s| s.hex)
+                .collect::<Vec<_>>()
+                .into(),
             kinds: filter.kinds.into(),
             since: filter.since,
             until: filter.until,
@@ -192,19 +209,19 @@ impl Filter {
         self.tags = t;
     }
 
-    pub fn match_id<K: AsRef<[u8]>>(ids: &SortList<String>, id: K) -> bool {
-        ids.is_empty() || match_prefix(ids, id.as_ref())
+    pub fn match_id(ids: &SortList<[u8; 32]>, id: &[u8; 32]) -> bool {
+        ids.is_empty() || ids.contains(id)
     }
 
-    pub fn match_author<P: AsRef<[u8]>, D: AsRef<[u8]>>(
-        authors: &SortList<String>,
-        pubkey: P,
-        delegator: Option<D>,
+    pub fn match_author(
+        authors: &SortList<[u8; 32]>,
+        pubkey: &[u8; 32],
+        delegator: Option<&[u8; 32]>,
     ) -> bool {
         authors.is_empty()
-            || match_prefix(authors, pubkey.as_ref())
+            || Self::match_id(authors, pubkey)
             || delegator
-                .map(|d| match_prefix(authors, d.as_ref()))
+                .map(|d| Self::match_id(authors, d))
                 .unwrap_or_default()
     }
 
@@ -277,22 +294,6 @@ impl Filter {
     }
 }
 
-fn match_prefix(prefixes: &SortList<String>, target: &[u8]) -> bool {
-    if prefixes.is_empty() {
-        return true;
-    }
-    let target = hex::encode(target);
-    prefixes
-        .binary_search_by(|p| {
-            if target.starts_with(p) {
-                Ordering::Equal
-            } else {
-                p.cmp(&target)
-            }
-        })
-        .is_ok()
-}
-
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, str::FromStr};
@@ -312,8 +313,8 @@ mod tests {
         // valid
         let note = r###"
         {
-            "ids": ["ab", "cd", "12"],
-            "authors": ["ab", "cd", "12"],
+            "ids": ["abababababababababababababababababababababababababababababababab", "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", "1212121212121212121212121212121212121212121212121212121212121212"],
+            "authors": ["abababababababababababababababababababababababababababababababab", "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", "1212121212121212121212121212121212121212121212121212121212121212"],
             "kinds": [2, 1],
             "until": 5,
             "since": 3,
@@ -327,8 +328,8 @@ mod tests {
           }
         "###;
         let mut filter: Filter = serde_json::from_str(note)?;
-        let li = SortList::from(vec!["12".to_string(), "ab".to_string(), "cd".to_string()]);
-        let tags: SortList<Vec<u8>> = li
+        let li = SortList::from(vec![[0x12; 32], [0xab; 32], [0xcd; 32]]);
+        let tags: SortList<Vec<u8>> = ["ab", "cd", "12"]
             .iter()
             .map(|s| s.as_bytes().to_vec())
             .collect::<Vec<_>>()
@@ -490,8 +491,8 @@ mod tests {
         check_match(
             r###"
         {
-            "ids": ["33", "other"],
-            "authors": ["7a", "other"],
+            "ids": ["332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d", "0000000000000000000000000000000000000000000000000000000000000000"],
+            "authors": ["7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef", "0000000000000000000000000000000000000000000000000000000000000000"],
             "kind": [1, 2],
             "#t": ["nostr", "other"],
             "#subject": ["db", "other"],
@@ -530,7 +531,7 @@ mod tests {
         check_match(
             r###"
         {
-            "ids": ["33"]
+            "ids": ["332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d"]
         }
         "###,
             true,
@@ -541,7 +542,7 @@ mod tests {
         check_match(
             r###"
         {
-            "ids": ["ab"]
+            "ids": ["abababababababababababababababababababababababababababababababab"]
         }
         "###,
             false,

@@ -486,7 +486,7 @@ pub fn test_events_delegator() -> Result<()> {
 
     db.batch_put(&events)?;
     let filter = Filter {
-        authors: vec![hex::encode(author(1))].into(),
+        authors: vec![author(1)].into(),
         ..Default::default()
     };
     let e1 = all(&db, &filter)?;
@@ -494,7 +494,7 @@ pub fn test_events_delegator() -> Result<()> {
 
     // query by tag
     let filter = Filter {
-        authors: vec![hex::encode(author(1))].into(),
+        authors: vec![author(1)].into(),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
@@ -517,7 +517,7 @@ pub fn test_events_delegator() -> Result<()> {
 
     db.batch_put(&events)?;
     let filter = Filter {
-        authors: vec![hex::encode(author(1))].into(),
+        authors: vec![author(1)].into(),
         ..Default::default()
     };
     let e1 = all(&db, &filter)?;
@@ -634,25 +634,6 @@ pub fn test_query_authors_by_prefix() -> Result<()> {
         .collect::<Vec<Event>>();
     db.batch_put(events)?;
 
-    // prefix break time range
-    let filter = Filter {
-        authors: vec![hex::encode(author(250))[0..63].to_string()].into(),
-        since: Some(2),
-        until: Some(4),
-        desc: true,
-        ..Default::default()
-    };
-    let e1 = count(&db, &filter)?;
-    assert_eq!(e1.0, 6);
-
-    let e1 = all(&db, &filter)?;
-    assert_eq!(e1.0.len(), 6);
-    assert_eq!(e1.0[0].created_at(), 4);
-    assert_eq!(e1.0[1].created_at(), 3);
-    assert_eq!(e1.0[2].created_at(), 2);
-    assert_eq!(e1.0[3].created_at(), 4);
-    assert_eq!(e1.0[4].created_at(), 3);
-    assert_eq!(e1.0[5].created_at(), 2);
     Ok(())
 }
 
@@ -691,7 +672,7 @@ pub fn test_query_author_kinds() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        authors: vec![hex::encode(author(20))].into(),
+        authors: vec![author(20)].into(),
         kinds: vec![1000, 1001].into(),
         desc: false,
         ..Default::default()
@@ -707,7 +688,7 @@ pub fn test_query_author_kinds() -> Result<()> {
     }
     // rev
     let filter = Filter {
-        authors: vec![hex::encode(author(20))].into(),
+        authors: vec![author(20)].into(),
         kinds: vec![1000, 1001].into(),
         desc: true,
         ..Default::default()
@@ -717,15 +698,7 @@ pub fn test_query_author_kinds() -> Result<()> {
     for i in 0..7 {
         assert!(e1.0[i].created_at() >= e1.0[i + 1].created_at());
     }
-    // prefix
-    let filter = Filter {
-        authors: vec![hex::encode(author(20))[0..63].to_string()].into(),
-        kinds: vec![1000, 1001].into(),
-        desc: true,
-        ..Default::default()
-    };
-    let e1 = all(&db, &filter)?;
-    assert_eq!(e1.0.len(), 8);
+
     Ok(())
 }
 
@@ -766,7 +739,7 @@ pub fn test_query_authors() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        authors: vec![hex::encode(author(10))].into(),
+        authors: vec![author(10)].into(),
         desc: false,
         ..Default::default()
     };
@@ -774,7 +747,7 @@ pub fn test_query_authors() -> Result<()> {
     assert_eq!(e1.0.len(), PER_NUM as usize);
 
     let filter = Filter {
-        authors: vec![hex::encode(author(20))].into(),
+        authors: vec![author(20)].into(),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag1".to_string().into_bytes()].into(),
@@ -992,7 +965,7 @@ pub fn test_query_tag() -> Result<()> {
             vec!["query tag".to_string().into_bytes()].into(),
         )]),
         kinds: vec![1, 2, 3].into(),
-        authors: vec![hex::encode(author(20))].into(),
+        authors: vec![author(20)].into(),
         desc: true,
         ..Default::default()
     };
@@ -1114,7 +1087,7 @@ pub fn test_query_ids() -> Result<()> {
     db.batch_put(events)?;
 
     let filter = Filter {
-        ids: vec![hex::encode(id(prefix, 0))].into(),
+        ids: vec![id(prefix, 0)].into(),
         desc: false,
         ..Default::default()
     };
@@ -1123,12 +1096,7 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0[0].id(), &id(prefix, 0));
 
     let filter = Filter {
-        ids: vec![
-            hex::encode(id(prefix, 2)),
-            hex::encode(id(prefix, 4)),
-            hex::encode(id(prefix, 3)),
-        ]
-        .into(),
+        ids: vec![id(prefix, 2), id(prefix, 4), id(prefix, 3)].into(),
         desc: false,
         ..Default::default()
     };
@@ -1140,12 +1108,7 @@ pub fn test_query_ids() -> Result<()> {
 
     // desc
     let filter = Filter {
-        ids: vec![
-            hex::encode(id(prefix, 2)),
-            hex::encode(id(prefix, 4)),
-            hex::encode(id(prefix, 3)),
-        ]
-        .into(),
+        ids: vec![id(prefix, 2), id(prefix, 4), id(prefix, 3)].into(),
         desc: true,
         ..Default::default()
     };
@@ -1157,12 +1120,7 @@ pub fn test_query_ids() -> Result<()> {
 
     // desc
     let filter = Filter {
-        ids: vec![
-            hex::encode(id(prefix, 2)),
-            hex::encode(id(prefix, 4)),
-            hex::encode(id(prefix, 3)),
-        ]
-        .into(),
+        ids: vec![id(prefix, 2), id(prefix, 4), id(prefix, 3)].into(),
         desc: true,
         ..Default::default()
     };
@@ -1172,42 +1130,9 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0[1].id(), &id(prefix, 3));
     assert_eq!(e1.0[2].id(), &id(prefix, 2));
 
-    // prefix
     let filter = Filter {
-        ids: vec![hex::encode(id(prefix, 0))[0..62].to_string()].into(),
-        desc: true,
-        ..Default::default()
-    };
-    let e1 = all(&db, &filter)?;
-    assert_eq!(e1.0.len(), PER_NUM as usize);
-    assert_eq!(e1.0[0].id(), &id(prefix, 29));
-
-    let filter = Filter {
-        ids: vec![hex::encode(id(prefix, 0))[0..62].to_string()].into(),
-        desc: false,
-        ..Default::default()
-    };
-    let e1 = all(&db, &filter)?;
-    assert_eq!(e1.0.len(), PER_NUM as usize);
-    assert_eq!(e1.0[0].id(), &id(prefix, 0));
-
-    let filter = Filter {
-        ids: vec![hex::encode(id(prefix, 0))[0..63].to_string()].into(),
-        desc: true,
-        ..Default::default()
-    };
-    let e1 = all(&db, &filter)?;
-    assert_eq!(e1.0.len(), 16);
-    assert_eq!(e1.0[0].id(), &id(prefix, 15));
-
-    let filter = Filter {
-        ids: vec![
-            hex::encode(id(10, 1)),
-            hex::encode(id(10, 2)),
-            hex::encode(id(10, 3)),
-        ]
-        .into(),
-        authors: vec![hex::encode(author(30))].into(),
+        ids: vec![id(10, 1), id(10, 2), id(10, 3)].into(),
+        authors: vec![author(30)].into(),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
@@ -1220,13 +1145,8 @@ pub fn test_query_ids() -> Result<()> {
     assert_eq!(e1.0.len(), 3);
 
     let filter = Filter {
-        ids: vec![
-            hex::encode(id(10, 1)),
-            hex::encode(id(10, 2)),
-            hex::encode(id(10, 3)),
-        ]
-        .into(),
-        authors: vec![hex::encode(author(20))].into(),
+        ids: vec![id(10, 1), id(10, 2), id(10, 3)].into(),
+        authors: vec![author(20)].into(),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
@@ -1313,13 +1233,8 @@ pub fn test_query_search() -> Result<()> {
     assert_eq!(e1.0.len(), PER_NUM as usize);
 
     let mut filter = Filter {
-        ids: vec![
-            hex::encode(id(10, 1)),
-            hex::encode(id(10, 2)),
-            hex::encode(id(10, 3)),
-        ]
-        .into(),
-        authors: vec![hex::encode(author(1))].into(),
+        ids: vec![id(10, 1), id(10, 2), id(10, 3)].into(),
+        authors: vec![author(1)].into(),
         tags: HashMap::from([(
             "t".to_string().into_bytes(),
             vec!["query tag".to_string().into_bytes()].into(),
