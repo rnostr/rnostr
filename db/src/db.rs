@@ -890,71 +890,21 @@ where
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, false, false);
-        let key_len = 32;
 
-        for key in filter.authors.iter() {
-            let odd = key.len() % 2 == 1;
-            let prefix = if odd {
-                // range 0 to f
-                if filter.desc {
-                    hex::decode(key.to_string() + "f")
-                } else {
-                    hex::decode(key.to_string() + "0")
-                }
-            } else {
-                hex::decode(key)
-            };
-            let prefix = prefix?;
-            // full key
-            if key.len() == key_len * 2 {
-                for kind in filter.kinds.iter() {
-                    let prefix: Vec<u8> = concat(&prefix, u16_to_ver(*kind));
-                    let iter = create_iter(reader, view, &prefix, filter.desc);
-                    let scanner = Scanner::new(
-                        iter,
-                        key.as_bytes().to_vec(),
-                        prefix,
-                        filter.desc,
-                        filter.since,
-                        filter.until,
-                        Box::new(|s, r| {
-                            let k = r.0;
-                            Ok(if k.starts_with(&s.prefix) {
-                                MatchResult::Found(IndexKey::from(k, r.1)?)
-                            } else {
-                                MatchResult::Stop
-                            })
-                        }),
-                    );
-                    group.add(Box::new(scanner))?;
-                }
-            } else {
-                let clone_kinds = filter.kinds.clone();
-                // like scan by author, check kind later
+        for author in filter.authors.iter() {
+            for kind in filter.kinds.iter() {
+                let prefix: Vec<u8> = concat(author, u16_to_ver(*kind));
                 let iter = create_iter(reader, view, &prefix, filter.desc);
-
                 let scanner = Scanner::new(
                     iter,
-                    key.as_bytes().to_vec(),
+                    author.to_vec(),
                     prefix,
                     filter.desc,
                     filter.since,
                     filter.until,
-                    Box::new(move |s, r| {
-                        let k = r.0;
-                        let ok = if odd {
-                            hex::encode(k).as_bytes().starts_with(&s.key)
-                        } else {
-                            k.starts_with(&s.prefix)
-                        };
-                        Ok(if ok {
-                            // check kind
-                            let kind = u16_from_bytes(&k[32..34])?;
-                            if !clone_kinds.contains(&kind) {
-                                MatchResult::Continue
-                            } else {
-                                MatchResult::Found(IndexKey::from(k, r.1)?)
-                            }
+                    Box::new(|s, r| {
+                        Ok(if r.0.starts_with(&s.prefix) {
+                            MatchResult::Found(IndexKey::from(r.0, r.1)?)
                         } else {
                             MatchResult::Stop
                         })
@@ -971,42 +921,25 @@ where
         kv_db: &Db,
         reader: &'txn R,
         filter: &Filter,
-        ids: &[String],
+        ids: &[[u8; 32]],
         view: &Tree,
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, false, false);
 
-        for key in ids.iter() {
-            let odd = key.len() % 2 == 1;
-            let prefix = if odd {
-                // range 0 to f
-                if filter.desc {
-                    hex::decode(key.to_string() + "f")
-                } else {
-                    hex::decode(key.to_string() + "0")
-                }
-            } else {
-                hex::decode(key)
-            };
-            let prefix = prefix?;
+        for id in ids.iter() {
+            let prefix = id.to_vec();
             let iter = create_iter(reader, view, &prefix, filter.desc);
             let scanner = Scanner::new(
                 iter,
-                key.as_bytes().to_vec(),
+                prefix.clone(),
                 prefix,
                 filter.desc,
                 filter.since,
                 filter.until,
                 Box::new(move |s, r| {
-                    let k = r.0;
-                    let ok = if odd {
-                        hex::encode(k).as_bytes().starts_with(&s.key)
-                    } else {
-                        k.starts_with(&s.prefix)
-                    };
-                    Ok(if ok {
-                        MatchResult::Found(IndexKey::from(k, r.1)?)
+                    Ok(if r.0.starts_with(&s.prefix) {
+                        MatchResult::Found(IndexKey::from(r.0, r.1)?)
                     } else {
                         MatchResult::Stop
                     })
