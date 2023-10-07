@@ -589,36 +589,45 @@ impl Db {
         filter: &Filter,
     ) -> Result<Iter<'txn, T, J>> {
         if filter.search.as_ref().is_some() {
-            let match_index = if filter.ids.is_some()
+            let match_index = if !filter.ids.is_empty()
                 || !filter.tags.is_empty()
-                || filter.authors.is_some()
-                || filter.kinds.is_some()
+                || !filter.authors.is_empty()
+                || !filter.kinds.is_empty()
             {
                 MatchIndex::All
             } else {
                 MatchIndex::None
             };
             Iter::new_word(self, txn, filter, &self.t_word, match_index)
-        } else if let Some(ids) = filter.ids.as_ref() {
-            let match_index =
-                if !filter.tags.is_empty() || filter.authors.is_some() || filter.kinds.is_some() {
-                    MatchIndex::All
-                } else {
-                    MatchIndex::None
-                };
-            Iter::new_prefix(self, txn, filter, ids, &self.t_id, match_index)
+        } else if !filter.ids.is_empty() {
+            let match_index = if !filter.tags.is_empty()
+                || !filter.authors.is_empty()
+                || !filter.kinds.is_empty()
+            {
+                MatchIndex::All
+            } else {
+                MatchIndex::None
+            };
+            Iter::new_prefix(self, txn, filter, &filter.ids, &self.t_id, match_index)
         } else if !filter.tags.is_empty() {
-            let match_index = if filter.authors.is_some() {
+            let match_index = if !filter.authors.is_empty() {
                 MatchIndex::Pubkey
             } else {
                 MatchIndex::None
             };
             Iter::new_tag(self, txn, filter, &self.t_tag, match_index)
-        } else if filter.authors.is_some() && filter.kinds.is_some() {
+        } else if !filter.authors.is_empty() && !filter.kinds.is_empty() {
             Iter::new_author_kind(self, txn, filter, &self.t_pubkey_kind, MatchIndex::None)
-        } else if let Some(ids) = filter.authors.as_ref() {
-            Iter::new_prefix(self, txn, filter, ids, &self.t_pubkey, MatchIndex::None)
-        } else if filter.kinds.is_some() {
+        } else if !filter.authors.is_empty() {
+            Iter::new_prefix(
+                self,
+                txn,
+                filter,
+                &filter.authors,
+                &self.t_pubkey,
+                MatchIndex::None,
+            )
+        } else if !filter.kinds.is_empty() {
             Iter::new_kind(self, txn, filter, &self.t_kind, MatchIndex::None)
         } else {
             Iter::new_time(self, txn, filter, &self.t_created_at, MatchIndex::None)
@@ -696,7 +705,7 @@ impl MatchIndex {
     fn r#match(&self, filter: &Filter, event: &ArchivedEventIndex) -> bool {
         match &self {
             MatchIndex::Pubkey => {
-                Filter::match_author(filter.authors.as_ref(), event.pubkey(), event.delegator())
+                Filter::match_author(&filter.authors, event.pubkey(), event.delegator())
             }
             _ => filter.match_archived(event),
         }
@@ -799,7 +808,7 @@ where
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, false, false);
-        for kind in filter.kinds.as_ref().unwrap().iter() {
+        for kind in filter.kinds.iter() {
             let prefix = u16_to_ver(*kind);
             let iter = create_iter(reader, view, &prefix, filter.desc);
             let scanner = Scanner::new(
@@ -831,7 +840,7 @@ where
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, true, false);
-        let has_kind = filter.kinds.is_some();
+        let has_kind = !filter.kinds.is_empty();
 
         for tag in filter.tags.iter() {
             let mut sub = Group::new(filter.desc, false, true);
@@ -856,9 +865,7 @@ where
                         let v = r.1;
                         Ok(if k.len() == klen && k.starts_with(&s.prefix) {
                             // filter
-                            if has_kind
-                                && !Filter::match_kind(kinds.as_ref(), u16_from_bytes(&v[8..10])?)
-                            {
+                            if has_kind && !Filter::match_kind(&kinds, u16_from_bytes(&v[8..10])?) {
                                 MatchResult::Continue
                             } else {
                                 MatchResult::Found(IndexKey::from(k, v)?)
@@ -883,11 +890,9 @@ where
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, false, false);
-        let authors = filter.authors.as_ref().unwrap();
-        let kinds = filter.kinds.as_ref().unwrap();
         let key_len = 32;
 
-        for key in authors.iter() {
+        for key in filter.authors.iter() {
             let odd = key.len() % 2 == 1;
             let prefix = if odd {
                 // range 0 to f
@@ -902,7 +907,7 @@ where
             let prefix = prefix?;
             // full key
             if key.len() == key_len * 2 {
-                for kind in kinds.iter() {
+                for kind in filter.kinds.iter() {
                     let prefix: Vec<u8> = concat(&prefix, u16_to_ver(*kind));
                     let iter = create_iter(reader, view, &prefix, filter.desc);
                     let scanner = Scanner::new(
@@ -924,7 +929,7 @@ where
                     group.add(Box::new(scanner))?;
                 }
             } else {
-                let clone_kinds = kinds.clone();
+                let clone_kinds = filter.kinds.clone();
                 // like scan by author, check kind later
                 let iter = create_iter(reader, view, &prefix, filter.desc);
 
@@ -1020,29 +1025,27 @@ where
         match_index: MatchIndex,
     ) -> Result<Self, Error> {
         let mut group = Group::new(filter.desc, true, true);
-        if let Some(words) = &filter.words {
-            for word in words {
-                let prefix = concat_sep(word, []);
-                let klen = prefix.len() + 8;
-                let iter = create_iter(reader, view, &prefix, filter.desc);
-                let scanner = Scanner::new(
-                    iter,
-                    vec![],
-                    prefix,
-                    filter.desc,
-                    filter.since,
-                    filter.until,
-                    Box::new(move |s, r| {
-                        let k = r.0;
-                        Ok(if k.len() == klen && k.starts_with(&s.prefix) {
-                            MatchResult::Found(IndexKey::from(k, r.1)?)
-                        } else {
-                            MatchResult::Stop
-                        })
-                    }),
-                );
-                group.add(Box::new(scanner))?;
-            }
+        for word in filter.words.iter() {
+            let prefix = concat_sep(word, []);
+            let klen = prefix.len() + 8;
+            let iter = create_iter(reader, view, &prefix, filter.desc);
+            let scanner = Scanner::new(
+                iter,
+                vec![],
+                prefix,
+                filter.desc,
+                filter.since,
+                filter.until,
+                Box::new(move |s, r| {
+                    let k = r.0;
+                    Ok(if k.len() == klen && k.starts_with(&s.prefix) {
+                        MatchResult::Found(IndexKey::from(k, r.1)?)
+                    } else {
+                        MatchResult::Stop
+                    })
+                }),
+            );
+            group.add(Box::new(scanner))?;
         }
         Self::new(kv_db, reader, filter, group, match_index)
     }

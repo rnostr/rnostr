@@ -5,7 +5,7 @@ use std::cmp::{Ord, Ordering};
 use std::{collections::HashMap, ops::Deref, str::FromStr};
 
 /// The sort list contains unduplicated and sorted items
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, Default)]
 pub struct SortList<T>(Vec<T>);
 
 impl<T: Ord> From<Vec<T>> for SortList<T> {
@@ -45,13 +45,13 @@ impl<T> Deref for SortList<T> {
 #[serde(try_from = "_Filter")]
 pub struct Filter {
     /// a list of event ids or prefixes
-    pub ids: Option<SortList<String>>,
+    pub ids: SortList<String>,
 
     /// a list of pubkeys or prefixes, the pubkey of an event must be one of these
-    pub authors: Option<SortList<String>>,
+    pub authors: SortList<String>,
 
     /// a list of a kind numbers
-    pub kinds: Option<SortList<u16>>,
+    pub kinds: SortList<u16>,
 
     pub since: Option<u64>,
     pub until: Option<u64>,
@@ -68,7 +68,7 @@ pub struct Filter {
     pub desc: bool,
 
     #[serde(skip)]
-    pub words: Option<Vec<Vec<u8>>>,
+    pub words: Vec<Vec<u8>>,
 }
 
 impl FromStr for Filter {
@@ -78,15 +78,16 @@ impl FromStr for Filter {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
+#[serde(default)]
 struct _Filter {
-    pub ids: Option<Vec<String>>,
-    pub authors: Option<Vec<String>>,
-    pub kinds: Option<Vec<u16>>,
+    pub ids: Vec<String>,
+    pub authors: Vec<String>,
+    pub kinds: Vec<u16>,
     pub since: Option<u64>,
     pub until: Option<u64>,
     pub limit: Option<u64>,
-    pub keywords: Option<Vec<String>>,
+    pub keywords: Vec<String>,
     pub search: Option<String>,
     #[serde(flatten)]
     pub tags: HashMap<String, Value>,
@@ -97,8 +98,8 @@ impl TryFrom<_Filter> for Filter {
     fn try_from(filter: _Filter) -> Result<Self, Self::Error> {
         // deserialize search option, convert keywords array to string
         let mut search = filter.search;
-        if search.is_none() && filter.keywords.is_some() {
-            search = Some(filter.keywords.unwrap().join(" "));
+        if search.is_none() && !filter.keywords.is_empty() {
+            search = Some(filter.keywords.join(" "));
         }
 
         // only use valid tag, has prefix "#", string item, not empty
@@ -135,39 +136,21 @@ impl TryFrom<_Filter> for Filter {
             }
         }
 
-        let ids = clean_sort_list(filter.ids);
-        let authors = clean_sort_list(filter.authors);
-        // let empty = "".to_string();
-        // if let Some(a) = ids.as_ref() {
-        //     if a.contains(&empty) {
-        //         return Err(serde::de::Error::invalid_type(
-        //             serde::de::Unexpected::Other("prefix matches must not be empty strings"),
-        //             &"a json object",
-        //         ));
-        //     }
-        // }
-
         let f = Filter {
-            ids,
-            authors,
-            kinds: clean_sort_list(filter.kinds),
+            ids: filter.ids.into(),
+            authors: filter.authors.into(),
+            kinds: filter.kinds.into(),
             since: filter.since,
             until: filter.until,
             limit: filter.limit,
             search,
             tags,
             desc: filter.limit.is_some(),
-            words: None,
+            words: vec![],
         };
 
         Ok(f)
     }
-}
-
-// clean empty
-// sort list for binary search
-fn clean_sort_list<T: std::cmp::Ord>(list: Option<Vec<T>>) -> Option<SortList<T>> {
-    list.filter(|li| !li.is_empty()).map(SortList::from)
 }
 
 impl Filter {
@@ -177,7 +160,7 @@ impl Filter {
         if let Some(search) = &self.search {
             let words = crate::segment(search);
             if !words.is_empty() {
-                self.words = Some(words);
+                self.words = words;
             }
         }
     }
@@ -209,28 +192,24 @@ impl Filter {
         self.tags = t;
     }
 
-    pub fn match_id<K: AsRef<[u8]>>(ids: Option<&SortList<String>>, id: K) -> bool {
-        ids.map_or(true, |ids| match_prefix(ids, id.as_ref()))
+    pub fn match_id<K: AsRef<[u8]>>(ids: &SortList<String>, id: K) -> bool {
+        ids.is_empty() || match_prefix(ids, id.as_ref())
     }
 
     pub fn match_author<P: AsRef<[u8]>, D: AsRef<[u8]>>(
-        authors: Option<&SortList<String>>,
+        authors: &SortList<String>,
         pubkey: P,
         delegator: Option<D>,
     ) -> bool {
-        authors.map_or(true, |ids| {
-            if match_prefix(ids, pubkey.as_ref()) {
-                true
-            } else if let Some(d) = delegator {
-                match_prefix(ids, d.as_ref())
-            } else {
-                false
-            }
-        })
+        authors.is_empty()
+            || match_prefix(authors, pubkey.as_ref())
+            || delegator
+                .map(|d| match_prefix(authors, d.as_ref()))
+                .unwrap_or_default()
     }
 
-    pub fn match_kind(kinds: Option<&SortList<u16>>, kind: u16) -> bool {
-        kinds.map_or(true, |ks| ks.contains(&kind))
+    pub fn match_kind(kinds: &SortList<u16>, kind: u16) -> bool {
+        kinds.is_empty() || kinds.contains(&kind)
     }
 
     pub fn match_tag<V: AsRef<[u8]>, I: AsRef<[(V, V)]>>(
@@ -278,11 +257,11 @@ impl Filter {
     }
 
     pub fn match_except_tag(&self, event: &EventIndex) -> bool {
-        Self::match_id(self.ids.as_ref(), event.id())
+        Self::match_id(&self.ids, event.id())
             && self.since.map_or(true, |t| event.created_at() >= t)
             && self.until.map_or(true, |t| event.created_at() <= t)
-            && Self::match_kind(self.kinds.as_ref(), event.kind())
-            && Self::match_author(self.authors.as_ref(), event.pubkey(), event.delegator())
+            && Self::match_kind(&self.kinds, event.kind())
+            && Self::match_author(&self.authors, event.pubkey(), event.delegator())
     }
 
     pub fn match_archived(&self, event: &ArchivedEventIndex) -> bool {
@@ -290,11 +269,11 @@ impl Filter {
     }
 
     pub fn match_archived_except_tag(&self, event: &ArchivedEventIndex) -> bool {
-        Self::match_id(self.ids.as_ref(), event.id())
+        Self::match_id(&self.ids, event.id())
             && self.since.map_or(true, |t| event.created_at() >= t)
             && self.until.map_or(true, |t| event.created_at() <= t)
-            && Self::match_kind(self.kinds.as_ref(), event.kind())
-            && Self::match_author(self.authors.as_ref(), event.pubkey(), event.delegator())
+            && Self::match_kind(&self.kinds, event.kind())
+            && Self::match_author(&self.authors, event.pubkey(), event.delegator())
     }
 }
 
@@ -328,7 +307,7 @@ mod tests {
         let note = "{}";
         let filter: Filter = serde_json::from_str(note)?;
         assert!(filter.tags.is_empty());
-        assert!(filter.ids.is_none());
+        assert!(filter.ids.is_empty());
 
         // valid
         let note = r###"
@@ -354,9 +333,9 @@ mod tests {
             .map(|s| s.as_bytes().to_vec())
             .collect::<Vec<_>>()
             .into();
-        assert_eq!(&filter.ids.as_ref(), &Some(&li));
-        assert_eq!(&filter.authors.as_ref(), &Some(&li));
-        assert_eq!(&filter.kinds, &Some(SortList::from(vec![1, 2])));
+        assert_eq!(&filter.ids, &li);
+        assert_eq!(&filter.authors, &li);
+        assert_eq!(&filter.kinds, &SortList::from(vec![1, 2]));
         assert_eq!(filter.until, Some(5));
         assert_eq!(filter.since, Some(3));
         assert_eq!(filter.limit, Some(6));

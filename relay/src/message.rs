@@ -75,10 +75,8 @@ impl ClientMessage {
                     // fill default limit
                     f.default_limit(limitation.max_limit);
                     check_max!(f.limit.unwrap(), limitation.max_limit);
-                    if let Some(ids) = &f.ids {
-                        for id in ids.iter() {
-                            check_min!(id.len(), limitation.min_prefix);
-                        }
+                    for id in f.ids.iter() {
+                        check_min!(id.len(), limitation.min_prefix);
                     }
                 }
             }
