@@ -133,12 +133,6 @@ impl Handler<ClientMessage> for Server {
                                         ),
                                     );
                                 }
-                                Subscribed::Duplicate => {
-                                    act.send_to_client(
-                                        session_id,
-                                        OutgoingMessage::notice("This subscription already exists"),
-                                    );
-                                },
                                 Subscribed::InvalidIdLength => {
                                     act.send_to_client(
                                         session_id,

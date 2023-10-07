@@ -338,7 +338,6 @@ pub struct ReadEventResult {
 pub enum Subscribed {
     Ok,
     Overlimit,
-    Duplicate,
     InvalidIdLength,
 }
 

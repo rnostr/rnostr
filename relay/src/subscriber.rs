@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::HashMap;
 
 use crate::{message::*, setting::SettingWrapper};
 use actix::prelude::*;
@@ -42,11 +42,10 @@ impl Handler<Subscribe> for Subscriber {
             // according to NIP-01, <subscription_id> is an arbitrary, non-empty string of max length 64 chars
             if id.is_empty() || id.len() > 64 {
                 Subscribed::InvalidIdLength
-            } else if let Entry::Vacant(entry) = map.entry(id) {
-                entry.insert(filters);
-                Subscribed::Ok
             } else {
-                Subscribed::Duplicate
+                // NIP01: overwrite the previous subscription
+                map.insert(id, filters);
+                Subscribed::Ok
             }
         }
     }
@@ -160,18 +159,6 @@ mod tests {
             })
             .await?;
         assert_eq!(res, Subscribed::Ok);
-        let res = subscriber
-            .send(Subscribe {
-                id: 0,
-                subscription: Subscription {
-                    id: 0.to_string(),
-                    filters: vec![Filter {
-                        ..Default::default()
-                    }],
-                },
-            })
-            .await?;
-        assert_eq!(res, Subscribed::Duplicate);
         let res = subscriber
             .send(Subscribe {
                 id: 0,
