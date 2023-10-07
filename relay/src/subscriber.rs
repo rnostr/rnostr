@@ -2,13 +2,66 @@ use std::collections::HashMap;
 
 use crate::{message::*, setting::SettingWrapper};
 use actix::prelude::*;
-use nostr_db::Filter;
+use nostr_db::{EventIndex, Filter};
 
-// TODO: use btree index for fast filter
+// index for fast filter
+#[derive(Debug, Default)]
+pub struct SubscriberIndex {
+    /// map session_id -> subscription_id -> filters
+    pub subscriptions: HashMap<usize, HashMap<String, Vec<Filter>>>,
+}
+
+impl SubscriberIndex {
+    pub fn add(
+        &mut self,
+        session_id: usize,
+        sub_id: String,
+        filters: Vec<Filter>,
+        limit: usize,
+    ) -> Subscribed {
+        let map = self.subscriptions.entry(session_id).or_default();
+        if map.len() >= limit {
+            Subscribed::Overlimit
+        } else {
+            // according to NIP-01, <subscription_id> is an arbitrary, non-empty string of max length 64 chars
+            if sub_id.is_empty() || sub_id.len() > 64 {
+                Subscribed::InvalidIdLength
+            } else {
+                // NIP01: overwrite the previous subscription
+                map.insert(sub_id, filters);
+                Subscribed::Ok
+            }
+        }
+    }
+
+    pub fn remove(&mut self, session_id: usize, sub_id: Option<String>) {
+        if let Some(sub_id) = sub_id {
+            if let Some(map) = self.subscriptions.get_mut(&session_id) {
+                map.remove(&sub_id);
+            }
+        } else {
+            self.subscriptions.remove(&session_id);
+        }
+    }
+
+    pub fn lookup(&self, event: &EventIndex, f: impl Fn(&usize, &String)) {
+        for (session_id, subs) in &self.subscriptions {
+            for (sub_id, filters) in subs {
+                for filter in filters {
+                    if filter.r#match(event) {
+                        f(session_id, sub_id);
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct Subscriber {
     pub addr: Recipient<SubscribeResult>,
     /// map session_id -> subscription_id -> filters
     pub subscriptions: HashMap<usize, HashMap<String, Vec<Filter>>>,
+    pub index: SubscriberIndex,
     pub setting: SettingWrapper,
 }
 
@@ -18,6 +71,7 @@ impl Subscriber {
             addr,
             subscriptions: HashMap::new(),
             setting,
+            index: SubscriberIndex::default(),
         }
     }
 }
@@ -32,33 +86,19 @@ impl Actor for Subscriber {
 impl Handler<Subscribe> for Subscriber {
     type Result = Subscribed;
     fn handle(&mut self, msg: Subscribe, _: &mut Self::Context) -> Subscribed {
-        let map = self.subscriptions.entry(msg.id).or_default();
-        if map.len() >= self.setting.read().limitation.max_subscriptions {
-            Subscribed::Overlimit
-        } else {
-            let Subscription { id, filters } = msg.subscription;
-            // according to NIP-01, <subscription_id> is an arbitrary, non-empty string of max length 64 chars
-            if id.is_empty() || id.len() > 64 {
-                Subscribed::InvalidIdLength
-            } else {
-                // NIP01: overwrite the previous subscription
-                map.insert(id, filters);
-                Subscribed::Ok
-            }
-        }
+        self.index.add(
+            msg.id,
+            msg.subscription.id,
+            msg.subscription.filters,
+            self.setting.read().limitation.max_subscriptions,
+        )
     }
 }
 
 impl Handler<Unsubscribe> for Subscriber {
     type Result = ();
     fn handle(&mut self, msg: Unsubscribe, _: &mut Self::Context) {
-        if let Some(sub_id) = msg.sub_id {
-            if let Some(map) = self.subscriptions.get_mut(&msg.id) {
-                map.remove(&sub_id);
-            }
-        } else {
-            self.subscriptions.remove(&msg.id);
-        }
+        self.index.remove(msg.id, msg.sub_id);
     }
 }
 
@@ -68,19 +108,13 @@ impl Handler<Dispatch> for Subscriber {
         let event = &msg.event;
         let index = event.index();
         let event_str = event.to_string();
-        for (session_id, subs) in &self.subscriptions {
-            for (sub_id, filters) in subs {
-                for filter in filters {
-                    if filter.r#match(index) {
-                        self.addr.do_send(SubscribeResult {
-                            id: *session_id,
-                            msg: OutgoingMessage::event(sub_id, &event_str),
-                            sub_id: sub_id.clone(),
-                        });
-                    }
-                }
-            }
-        }
+        self.index.lookup(index, |session_id, sub_id| {
+            self.addr.do_send(SubscribeResult {
+                id: *session_id,
+                msg: OutgoingMessage::event(sub_id, &event_str),
+                sub_id: sub_id.clone(),
+            });
+        });
     }
 }
 
