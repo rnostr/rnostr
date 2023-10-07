@@ -523,7 +523,7 @@ mod tests {
     name = "nostr"
     "#,
         )?;
-        sleep(Duration::from_millis(300));
+        sleep(Duration::from_secs(1));
         // println!("read {:?} {:?}", setting.read(), file);
         {
             let r = setting.read();
