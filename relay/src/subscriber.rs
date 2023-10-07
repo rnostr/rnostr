@@ -2,12 +2,11 @@ use std::collections::HashMap;
 
 use crate::{message::*, setting::SettingWrapper};
 use actix::prelude::*;
-use nostr_db::{Event, Filter};
+use nostr_db::Filter;
 
 // TODO: use btree index for fast filter
 pub struct Subscriber {
     pub addr: Recipient<SubscribeResult>,
-    pub events: Vec<(usize, Event)>,
     /// map session_id -> subscription_id -> filters
     pub subscriptions: HashMap<usize, HashMap<String, Vec<Filter>>>,
     pub setting: SettingWrapper,
@@ -17,7 +16,6 @@ impl Subscriber {
     pub fn new(addr: Recipient<SubscribeResult>, setting: SettingWrapper) -> Self {
         Self {
             addr,
-            events: Vec::new(),
             subscriptions: HashMap::new(),
             setting,
         }
@@ -159,6 +157,21 @@ mod tests {
             })
             .await?;
         assert_eq!(res, Subscribed::Ok);
+
+        // overwrite
+        let res = subscriber
+            .send(Subscribe {
+                id: 0,
+                subscription: Subscription {
+                    id: 0.to_string(),
+                    filters: vec![Filter {
+                        ..Default::default()
+                    }],
+                },
+            })
+            .await?;
+        assert_eq!(res, Subscribed::Ok);
+
         let res = subscriber
             .send(Subscribe {
                 id: 0,
