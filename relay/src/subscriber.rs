@@ -165,7 +165,7 @@ mod tests {
                 subscription: Subscription {
                     id: 1.to_string(),
                     filters: vec![Filter {
-                        kinds: Some(vec![1000].into()),
+                        kinds: vec![1000].into(),
                         ..Default::default()
                     }],
                 },
@@ -179,7 +179,7 @@ mod tests {
                 subscription: Subscription {
                     id: "".to_string(),
                     filters: vec![Filter {
-                        kinds: Some(vec![1000].into()),
+                        kinds: vec![1000].into(),
                         ..Default::default()
                     }],
                 },
@@ -194,7 +194,7 @@ mod tests {
                     id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefA"
                         .to_string(),
                     filters: vec![Filter {
-                        kinds: Some(vec![1000].into()),
+                        kinds: vec![1000].into(),
                         ..Default::default()
                     }],
                 },
