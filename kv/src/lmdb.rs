@@ -9,7 +9,7 @@ use std::{
     fs,
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    ops::{Bound, Deref},
+    ops::Bound,
     path::Path,
     ptr, slice,
     sync::Arc,
@@ -445,7 +445,7 @@ impl<'txn> Iter<'txn> {
                         self.op = ffi::MDB_GET_CURRENT;
                         match inner.get_by_key(start.as_ref(), ffi::MDB_SET_RANGE) {
                             Ok(Some((key, _))) => {
-                                let cmp = key.deref().cmp(start.as_ref());
+                                let cmp = key.cmp(start.as_ref());
                                 match cmp {
                                     Ordering::Greater => {
                                         self.op = ffi::MDB_PREV;
