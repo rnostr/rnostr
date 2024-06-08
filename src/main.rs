@@ -27,6 +27,8 @@ enum Commands {
     Bench(BenchOpts),
     /// Start nostr relay server
     Relay(RelayOpts),
+    /// Delete data by filter
+    Delete(DeleteOpts),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -44,6 +46,14 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Relay(opts) => {
             relay(&opts.config, opts.watch)?;
+        }
+        Commands::Delete(opts) => {
+            let count = delete(&opts.path, &opts.filter, opts.dry_run)?;
+            if opts.dry_run {
+                println!("Would delete {} events", count);
+            } else {
+                println!("Deleted {} events", count);
+            }
         }
     }
     Ok(())

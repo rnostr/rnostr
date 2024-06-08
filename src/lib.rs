@@ -69,6 +69,22 @@ pub struct ExportOpts {
     pub output: Output,
 }
 
+/// delete options
+#[derive(Debug, Clone, Parser)]
+pub struct DeleteOpts {
+    /// Nostr events data directory path. The "rnostr.example.toml" default setting is "data/events"
+    #[arg(value_name = "PATH")]
+    pub path: PathBuf,
+
+    /// [NIP-01](https://nips.be/1) Filter
+    #[arg(short = 'f', long, value_name = "FILTER", default_value = "{}")]
+    pub filter: Filter,
+
+    /// Dry run
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
 /// import
 pub fn import_opts(opts: ImportOpts) -> anyhow::Result<usize> {
     fn run_import_opts<F: Fn(usize)>(opts: ImportOpts, f: F) -> anyhow::Result<usize> {
@@ -234,4 +250,21 @@ pub fn export<F: Fn(usize)>(
     }
     output.finish()?;
     Ok(count)
+}
+
+pub fn delete(path: &PathBuf, filter: &Filter, dry_run: bool) -> Result<usize> {
+    let db = Db::open(path)?;
+    let reader = db.writer()?;
+    let iter = db.iter::<Vec<u8>, _>(&reader, filter)?;
+    let ids = iter.collect::<Result<Vec<Vec<u8>>, nostr_db::Error>>()?;
+    drop(reader);
+
+    let mut writer = db.writer()?;
+    for id in &ids {
+        if !dry_run {
+            db.del(&mut writer, id)?;
+        }
+    }
+    db.commit(writer)?;
+    Ok(ids.len())
 }
