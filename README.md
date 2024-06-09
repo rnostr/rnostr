@@ -136,6 +136,7 @@ rnostr provides other commands such as import and export.
 #   export  Export data to jsonl file
 #   bench   Benchmark filter
 #   relay   Start nostr relay server
+#   delete  Delete data by filter
 #   help    Print this message or the help of the given subcommand(s)
 
 # Options:
