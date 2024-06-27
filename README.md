@@ -23,6 +23,7 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 - [x] NIP-16: Event Treatment
 - [x] NIP-20: Command Results
 - [x] NIP-22: Event `created_at` Limits
+- [x] NIP-25: Reactions
 - [x] NIP-26: Delegated Event Signing
 - [x] NIP-28: Public Chat
 - [x] NIP-33: Parameterized Replaceable Events
