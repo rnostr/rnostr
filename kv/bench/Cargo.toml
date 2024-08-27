@@ -8,15 +8,15 @@ publish = false
 
 [dependencies]
 rand = "0.8.5"
-rayon = "1.7.0"
+rayon = "1.10.0"
 
 [dev-dependencies]
-anyhow = "1.0.71"
-criterion = "0.4.0"
+anyhow = "1.0.86"
+criterion = "0.5.1"
 lmdb-rkv = "0.14.0"
 nostr-kv = { path = "../"}
-tempfile = "3.5.0"
-thiserror = "1.0.40"
+tempfile = "3.12.0"
+thiserror = "1.0.63"
 
 [[bench]]
 name = "iter"

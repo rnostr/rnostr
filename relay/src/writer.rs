@@ -1,6 +1,6 @@
 use crate::{message::*, Result};
 use actix::prelude::*;
-use metrics::{histogram, increment_counter};
+use metrics::{counter, histogram};
 use nostr_db::{now, CheckEventResult, Db};
 use std::{
     sync::Arc,
@@ -50,7 +50,7 @@ impl Writer {
                 match res {
                     Ok(result) => {
                         if let CheckEventResult::Ok(_num) = result {
-                            increment_counter!("nostr_relay_new_event");
+                            counter!("nostr_relay_new_event").increment(1);
                         }
                         self.addr.do_send(WriteEventResult::Write {
                             id: event.id,
@@ -70,7 +70,7 @@ impl Writer {
                 }
             }
             self.db.commit(writer)?;
-            histogram!("nostr_relay_db_write", start.elapsed());
+            histogram!("nostr_relay_db_write").record(start.elapsed());
         }
         Ok(())
     }

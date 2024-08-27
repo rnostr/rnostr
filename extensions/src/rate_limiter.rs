@@ -1,7 +1,7 @@
 use governor::{
     clock::DefaultClock, state::keyed::DashMapStateStore, Quota, RateLimiter as GovernorRateLimiter,
 };
-use metrics::{describe_counter, increment_counter};
+use metrics::{counter, describe_counter};
 use nostr_relay::db::Event;
 use nostr_relay::{
     duration::NonZeroDuration,
@@ -223,7 +223,7 @@ impl Extension for Ratelimiter {
                 for (index, limiter) in self.event_limiters.iter().enumerate() {
                     let q = &self.setting.event[index];
                     if q.hit(event, ip) && limiter.check_key(ip).is_err() {
-                        increment_counter!("nostr_relay_rate_limiter_exceeded", "command" => "EVENT", "name" => q.name.clone());
+                        counter!("nostr_relay_rate_limiter_exceeded", "command" => "EVENT", "name" => q.name.clone()).increment(1);
                         return OutgoingMessage::ok(
                             &event.id_str(),
                             false,
@@ -251,7 +251,7 @@ mod tests {
     use futures_util::{SinkExt as _, StreamExt as _};
     use nostr_relay::db::{
         now,
-        secp256k1::{rand::thread_rng, KeyPair},
+        secp256k1::{rand::thread_rng, Keypair},
     };
     use nostr_relay::{create_web_app, Setting};
 
@@ -370,7 +370,7 @@ mod tests {
     #[actix_rt::test]
     async fn message() -> Result<()> {
         let mut rng = thread_rng();
-        let key_pair = KeyPair::new_global(&mut rng);
+        let key_pair = Keypair::new_global(&mut rng);
 
         let app = create_test_app("rate_limiter")?;
         {

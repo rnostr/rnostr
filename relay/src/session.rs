@@ -4,7 +4,7 @@ use actix_http::ws::Item;
 use actix_web::web;
 use actix_web_actors::ws;
 use bytes::BytesMut;
-use metrics::{decrement_gauge, increment_counter, increment_gauge};
+use metrics::{counter, gauge};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -92,7 +92,8 @@ impl Session {
             if Instant::now().duration_since(act.hb) > act.heartbeat_timeout {
                 // heartbeat timed out
                 // stop actor
-                increment_counter!("nostr_relay_session_stop_total", "reason" => "heartbeat timeout");
+                counter!("nostr_relay_session_stop_total", "reason" => "heartbeat timeout")
+                    .increment(1);
                 ctx.stop();
                 // don't try to send a ping
                 return;
@@ -108,7 +109,7 @@ impl Session {
             Ok(msg) => {
                 if let Some(cmd) = msg.known_command() {
                     // only insert known command metrics
-                    increment_counter!("nostr_relay_message_total", "command" => cmd);
+                    counter!("nostr_relay_message_total", "command" => cmd).increment(1);
                 }
 
                 let mut msg = ClientMessage {
@@ -171,8 +172,8 @@ impl Actor for Session {
 
     /// Method is called on actor start. We start the heartbeat process here.
     fn started(&mut self, ctx: &mut Self::Context) {
-        increment_counter!("nostr_relay_session_total");
-        increment_gauge!("nostr_relay_session", 1.0);
+        counter!("nostr_relay_session_total").increment(1);
+        gauge!("nostr_relay_session").increment(1.0);
 
         // we'll start heartbeat process on session start.
         self.hb(ctx);
@@ -192,9 +193,10 @@ impl Actor for Session {
                     }
                     // something is wrong with server
                     _ => {
-                        increment_counter!("nostr_relay_session_stop_total", "reason" => "server error");
+                        counter!("nostr_relay_session_stop_total", "reason" => "server error")
+                            .increment(1);
                         ctx.stop()
-                    },
+                    }
                 }
                 fut::ready(())
             })
@@ -208,7 +210,7 @@ impl Actor for Session {
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        decrement_gauge!("nostr_relay_session", 1.0);
+        gauge!("nostr_relay_session").decrement(1.0);
         self.app
             .clone()
             .extensions
@@ -233,7 +235,8 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
                     }
                     _ => {
                         debug!("Session error {} {} {:?}", self.id, self.ip, err);
-                        increment_counter!("nostr_relay_session_stop_total", "reason" => "message error");
+                        counter!("nostr_relay_session_stop_total", "reason" => "message error")
+                            .increment(1);
                         ctx.stop();
                     }
                 }
@@ -256,7 +259,8 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
             }
             ws::Message::Close(reason) => {
                 ctx.close(reason);
-                increment_counter!("nostr_relay_session_stop_total", "reason" => "message close");
+                counter!("nostr_relay_session_stop_total", "reason" => "message close")
+                    .increment(1);
                 ctx.stop();
             }
             ws::Message::Binary(_) => {

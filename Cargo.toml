@@ -1,6 +1,6 @@
 [package]
 name = "rnostr"
-version = "0.4.4"
+version = "0.4.5"
 description = "A high-performance and scalable nostr relay."
 keywords = ["nostr", "nostr-relay"]
 edition.workspace = true
@@ -14,18 +14,18 @@ path = "src/main.rs"
 name = "rnostr"
 
 [dependencies]
-actix-rt = "2.8.0"
-anyhow = "1.0.70"
-clap = { version = "4.2.7", features = ["derive"] }
-clio = { version = "0.2.7", features = ["clap-parse"] }
-indicatif = "0.17.3"
-nostr-db = { version = "0.4.3", path = "./db", features = ["search"] }
-nostr-relay = { version = "0.4.3", path = "./relay", features = ["search"] }
-nostr-extensions = { version = "0.4.3", path = "./extensions" }
-rayon = "1.7.0"
-thiserror = "1.0.40"
-tracing = "0.1.37"
-tracing-subscriber = "0.3.17"
+actix-rt = "2.10.0"
+anyhow = "1.0.86"
+clap = { version = "4.5.16", features = ["derive"] }
+clio = { version = "0.3.5", features = ["clap-parse"] }
+indicatif = "0.17.8"
+nostr-db = { version = "0.4.5", path = "./db", features = ["search"] }
+nostr-relay = { version = "0.4.5", path = "./relay", features = ["search"] }
+nostr-extensions = { version = "0.4.5", path = "./extensions" }
+rayon = "1.10.0"
+thiserror = "1.0.63"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
 
 # [features]
 # zstd = ["nostr-db/zstd"]

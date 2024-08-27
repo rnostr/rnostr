@@ -128,7 +128,7 @@ pub mod tests {
 
         let app = init_service(data.web_app()).await;
         sleep(Duration::from_millis(50)).await;
-        metrics::increment_counter!("test_metric");
+        metrics::counter!("test_metric").increment(1);
 
         let req = TestRequest::with_uri("/metrics").to_request();
         let res = app.call(req).await.unwrap();

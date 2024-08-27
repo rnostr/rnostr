@@ -92,9 +92,9 @@ pub fn import_opts(opts: ImportOpts) -> anyhow::Result<usize> {
         Ok(count)
     }
 
-    if matches!(opts.input, Input::File(_, _)) {
-        let path = opts.input.path();
-        let total_size = count_lines(path)? as u64;
+    let path = opts.input.path();
+    if path.is_local() {
+        let total_size = count_lines(path.path())? as u64;
         let pb = create_pb(total_size);
         let total = run_import_opts(opts, |c| {
             if c % 1000 == 0 {
@@ -209,7 +209,7 @@ pub fn export_opts(opts: ExportOpts) -> anyhow::Result<usize> {
         Ok(count)
     }
 
-    if matches!(opts.output, Output::File(_, _)) {
+    if opts.output.path().is_local() {
         let total_size = count(&opts.path, &opts.filter)?;
         let pb = create_pb(total_size);
         let total = run_export_opts(opts, |c| {

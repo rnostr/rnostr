@@ -1,4 +1,4 @@
-use metrics::{describe_counter, increment_counter};
+use metrics::{counter, describe_counter};
 use nostr_relay::db::now;
 use nostr_relay::{
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
@@ -172,7 +172,7 @@ impl Extension for Auth {
                         Some(&event.pubkey_str()),
                         session.ip(),
                     ) {
-                        increment_counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err);
+                        counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err).increment(1);
                         return OutgoingMessage::ok(
                             &event.id_str(),
                             false,
@@ -188,7 +188,7 @@ impl Extension for Auth {
                         None,
                         session.ip(),
                     ) {
-                        increment_counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err);
+                        counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err).increment(1);
                         return OutgoingMessage::notice(&format!("restricted: {}", err)).into();
                     }
                 }
@@ -209,7 +209,7 @@ mod tests {
     use futures_util::{SinkExt as _, StreamExt as _};
     use nostr_relay::create_web_app;
     use nostr_relay::db::{
-        secp256k1::{rand::thread_rng, KeyPair, XOnlyPublicKey},
+        secp256k1::{rand::thread_rng, Keypair, XOnlyPublicKey},
         Event,
     };
 
@@ -355,7 +355,7 @@ mod tests {
     #[actix_rt::test]
     async fn auth() -> Result<()> {
         let mut rng = thread_rng();
-        let key_pair = KeyPair::new_global(&mut rng);
+        let key_pair = Keypair::new_global(&mut rng);
 
         let app = create_test_app("auth")?;
         {
@@ -434,7 +434,7 @@ mod tests {
     #[actix_rt::test]
     async fn pubkey_whitelist() -> Result<()> {
         let mut rng = thread_rng();
-        let key_pair = KeyPair::new_global(&mut rng);
+        let key_pair = Keypair::new_global(&mut rng);
         let pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
 
         let app = create_test_app("auth-whitelist")?;
@@ -496,7 +496,7 @@ mod tests {
         let item = framed.next().await.unwrap()?;
         assert_eq!(item, ws::Frame::Close(Some(ws::CloseCode::Normal.into())));
 
-        let key_pair1 = KeyPair::new_global(&mut rng);
+        let key_pair1 = Keypair::new_global(&mut rng);
         // client service
         let mut framed = srv.ws_at("/").await.unwrap();
 

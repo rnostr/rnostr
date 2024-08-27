@@ -3,7 +3,7 @@ use rkyv::{
     vec::ArchivedVec, AlignedVec, Archive, Archived, Deserialize as RkyvDeserialize,
     Serialize as RkyvSerialize,
 };
-use secp256k1::{schnorr::Signature, KeyPair, Message, XOnlyPublicKey, SECP256K1};
+use secp256k1::{schnorr::Signature, Keypair, Message, XOnlyPublicKey, SECP256K1};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -301,7 +301,7 @@ impl Event {
     }
 
     pub fn create(
-        key_pair: &KeyPair,
+        key_pair: &Keypair,
         created_at: u64,
         kind: u16,
         tags: Vec<Vec<String>>,
@@ -310,7 +310,7 @@ impl Event {
         let pubkey = XOnlyPublicKey::from_keypair(key_pair).0.serialize();
         let id = hash(&pubkey, created_at, kind, &tags, &content);
         let sig = *SECP256K1
-            .sign_schnorr(&Message::from_slice(&id)?, key_pair)
+            .sign_schnorr(&Message::from_digest_slice(&id)?, key_pair)
             .as_ref();
         Self::new(id, pubkey, created_at, kind, tags, content, sig)
     }
@@ -621,7 +621,7 @@ fn verify_delegation(
 fn verify_sign(sig: &[u8], pk: &[u8], msg: &[u8]) -> Result<(), Error> {
     let sig = Signature::from_slice(sig)?;
     let pk = XOnlyPublicKey::from_slice(pk)?;
-    let msg = Message::from_slice(msg)?;
+    let msg = Message::from_digest_slice(msg)?;
     Ok(SECP256K1.verify_schnorr(&sig, &msg, &pk)?)
 }
 
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn create() -> Result<()> {
         let mut rng = thread_rng();
-        let key_pair = KeyPair::new_global(&mut rng);
+        let key_pair = Keypair::new_global(&mut rng);
         let event = Event::create(&key_pair, 0, 1, vec![], "".to_owned())?;
         assert!(event.verify_sign().is_ok());
         assert!(event.verify_id().is_ok());

@@ -69,7 +69,7 @@ mod tests {
     use nostr_relay::create_web_app;
     use nostr_relay::db::{
         now,
-        secp256k1::{rand::thread_rng, KeyPair},
+        secp256k1::{rand::thread_rng, Keypair},
         Event,
     };
 
@@ -86,7 +86,7 @@ mod tests {
     #[actix_rt::test]
     async fn message() -> Result<()> {
         let mut rng = thread_rng();
-        let key_pair = KeyPair::new_global(&mut rng);
+        let key_pair = Keypair::new_global(&mut rng);
 
         let app = create_test_app("search")?;
         {
