@@ -32,6 +32,11 @@ jobs:
           ]
     steps:
       - uses: actions/checkout@v3
+      - name: Install NASM
+        # Building `aws-lc-rs` for Windows MSVC depends on `NASM`.
+        # See: https://aws.github.io/aws-lc-rs/requirements/windows.html
+        uses: ilammy/setup-nasm@v1
+        if: ${{ contains(matrix.os, 'windows') }} 
       - name: Cache
         uses: actions/cache@v3
         with:
