@@ -153,17 +153,27 @@ impl Extension for Auth {
                 IncomingMessage::Auth(event) => {
                     if let Some(AuthState::Challenge(challenge)) = state {
                         if let Err(err) = event.validate(now(), 0, 0) {
-                            return OutgoingMessage::notice(&err.to_string()).into();
+                            return OutgoingMessage::ok(
+                                &event.id_str(),
+                                false,
+                                &format!("auth-required: {}", err),
+                            )
+                            .into();
                         } else if event.kind() == 22242 {
                             for tag in event.tags() {
                                 if tag.len() > 1 && tag[0] == "challenge" && &tag[1] == challenge {
                                     session.set(AuthState::Pubkey(event.pubkey_str()));
-                                    return OutgoingMessage::notice("auth success").into();
+                                    return OutgoingMessage::ok(&event.id_str(), true, "").into();
                                 }
                             }
                         }
                     }
-                    return OutgoingMessage::notice("auth error").into();
+                    return OutgoingMessage::ok(
+                        &event.id_str(),
+                        false,
+                        "auth-required: need reconnect",
+                    )
+                    .into();
                 }
                 IncomingMessage::Event(event) => {
                     if let Err(err) = Self::verify_permission(
@@ -176,12 +186,12 @@ impl Extension for Auth {
                         return OutgoingMessage::ok(
                             &event.id_str(),
                             false,
-                            &format!("restricted: {}", err),
+                            &format!("auth-required: {}", err),
                         )
                         .into();
                     }
                 }
-                IncomingMessage::Req(_) => {
+                IncomingMessage::Req(sub) => {
                     if let Err(err) = Self::verify_permission(
                         self.setting.req.as_ref(),
                         state.and_then(|s| s.pubkey()),
@@ -189,7 +199,9 @@ impl Extension for Auth {
                         session.ip(),
                     ) {
                         counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err).increment(1);
-                        return OutgoingMessage::notice(&format!("restricted: {}", err)).into();
+                        let msg = format!("auth-required: {}", err);
+                        return OutgoingMessage(format!(r#"["CLOSED","{}","{}"]"#, sub.id, msg))
+                            .into();
                     }
                 }
                 _ => {}
@@ -396,8 +408,8 @@ mod tests {
                 format!(r#"["AUTH", {}]"#, event.to_string()).into(),
             ))
             .await?;
-        let notice: (String, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.1.contains("invalid"));
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.3.contains("invalid"));
 
         let event = Event::create(&key_pair, now(), 22242, vec![], "".to_owned())?;
         framed
@@ -405,8 +417,8 @@ mod tests {
                 format!(r#"["AUTH", {}]"#, event.to_string()).into(),
             ))
             .await?;
-        let notice: (String, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.1.contains("error"));
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.3.contains("need"));
 
         let event = Event::create(
             &key_pair,
@@ -420,8 +432,8 @@ mod tests {
                 format!(r#"["AUTH", {}]"#, event.to_string()).into(),
             ))
             .await?;
-        let notice: (String, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.1.contains("success"));
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.2);
 
         framed
             .send(ws::Message::Close(Some(ws::CloseCode::Normal.into())))
@@ -444,11 +456,15 @@ mod tests {
                 r#"{{
                 "auth": {{
                     "enabled": true,
+                    "req": {{
+                        "pubkey_whitelist": ["{}"]
+                    }},
                     "event": {{
                         "pubkey_whitelist": ["{}"]
                     }}
                 }}
             }}"#,
+                pubkey.to_string(),
                 pubkey.to_string()
             ))?;
         }
@@ -465,6 +481,15 @@ mod tests {
         let state: (String, String) = parse_text(&item)?;
         assert_eq!(state.0, "AUTH");
 
+        // req
+        framed
+            .send(ws::Message::Text(r#"["REQ", "1", {}]"#.into()))
+            .await?;
+
+        let notice: (String, String, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert_eq!(notice.0, "CLOSED");
+        assert!(notice.2.contains("auth-required"));
+
         let event = Event::create(
             &key_pair,
             now(),
@@ -477,8 +502,8 @@ mod tests {
                 format!(r#"["AUTH", {}]"#, event.to_string()).into(),
             ))
             .await?;
-        let notice: (String, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.1.contains("success"));
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.2);
 
         // write
         let event = Event::create(&key_pair, now(), 1, vec![], "test".to_owned())?;
@@ -517,8 +542,8 @@ mod tests {
                 format!(r#"["AUTH", {}]"#, event.to_string()).into(),
             ))
             .await?;
-        let notice: (String, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.1.contains("success"));
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.2);
 
         // write
         let event = Event::create(&key_pair, now(), 1, vec![], "test".to_owned())?;
@@ -528,7 +553,7 @@ mod tests {
             ))
             .await?;
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.3.contains("restricted"));
+        assert!(notice.3.contains("auth-required"));
         assert!(!notice.2);
 
         framed
