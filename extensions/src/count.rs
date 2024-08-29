@@ -73,10 +73,10 @@ impl Extension for Count {
                             )))
                         }
                         Err(err) => {
-                            return ExtensionMessageResult::Stop(OutgoingMessage::notice(&format!(
-                                "count event error: {}",
-                                err
-                            )))
+                            return ExtensionMessageResult::Stop(OutgoingMessage::closed(
+                                &sub.id,
+                                &format!("count event error: {}", err),
+                            ))
                         }
                     }
                 }

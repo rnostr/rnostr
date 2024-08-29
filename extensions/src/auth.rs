@@ -191,7 +191,7 @@ impl Extension for Auth {
                         .into();
                     }
                 }
-                IncomingMessage::Req(sub) => {
+                IncomingMessage::Req(sub) | IncomingMessage::Count(sub) => {
                     if let Err(err) = Self::verify_permission(
                         self.setting.req.as_ref(),
                         state.and_then(|s| s.pubkey()),
@@ -200,8 +200,7 @@ impl Extension for Auth {
                     ) {
                         counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err).increment(1);
                         let msg = format!("auth-required: {}", err);
-                        return OutgoingMessage(format!(r#"["CLOSED","{}","{}"]"#, sub.id, msg))
-                            .into();
+                        return OutgoingMessage::closed(&sub.id, &msg).into();
                     }
                 }
                 _ => {}

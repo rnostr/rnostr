@@ -258,6 +258,10 @@ impl OutgoingMessage {
         Self(json!(["NOTICE", message]).to_string())
     }
 
+    pub fn closed(sub_id: &str, message: &str) -> Self {
+        Self(json!(["CLOSED", sub_id, message]).to_string())
+    }
+
     pub fn eose(sub_id: &str) -> Self {
         Self(format!(r#"["EOSE","{}"]"#, sub_id))
     }
@@ -444,6 +448,11 @@ mod tests {
         let msg = OutgoingMessage::eose("hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["EOSE","hello"]"#);
+
+        let msg = OutgoingMessage::closed("1", "hello");
+        let json = msg.to_string();
+        assert_eq!(json, r#"["CLOSED","1","hello"]"#);
+
         // let event = Event::default();
         // let msg = OutgoingMessage("id".to_owned(), Some(event));
         // let json = msg.to_string();

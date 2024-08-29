@@ -126,6 +126,8 @@ impl Session {
                                 false,
                                 &err.to_string(),
                             ));
+                        } else if let IncomingMessage::Req(sub) = &msg.msg {
+                            ctx.text(OutgoingMessage::closed(&sub.id, &err.to_string()));
                         } else {
                             ctx.text(OutgoingMessage::notice(&err.to_string()));
                         }

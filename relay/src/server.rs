@@ -113,6 +113,7 @@ impl Handler<ClientMessage> for Server {
                     id: msg.id,
                     subscription: subscription.clone(),
                 };
+                let sub_id = subscription.id.clone();
                 self.subscriber
                     .send(Subscribe {
                         id: msg.id,
@@ -128,7 +129,8 @@ impl Handler<ClientMessage> for Server {
                                 Subscribed::Overlimit => {
                                     act.send_to_client(
                                         session_id,
-                                        OutgoingMessage::notice(
+                                        OutgoingMessage::closed(
+                                            &sub_id,
                                             "Number of subscriptions exceeds limit",
                                         ),
                                     );
@@ -136,14 +138,14 @@ impl Handler<ClientMessage> for Server {
                                 Subscribed::InvalidIdLength => {
                                     act.send_to_client(
                                         session_id,
-                                        OutgoingMessage::notice("Subscription id should be non-empty string of max length 64 chars"),
+                                        OutgoingMessage::closed(&sub_id, "Subscription id should be non-empty string of max length 64 chars"),
                                     );
                                 }
                             },
                             Err(_err) => {
                                 act.send_to_client(
                                     session_id,
-                                    OutgoingMessage::notice("Something is wrong"),
+                                    OutgoingMessage::closed(&sub_id, "Something is wrong"),
                                 );
                             }
                         }

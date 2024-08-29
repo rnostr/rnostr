@@ -55,10 +55,14 @@ impl Handler<ReadEvent> for Reader {
     type Result = ();
     fn handle(&mut self, msg: ReadEvent, _: &mut Self::Context) {
         if let Err(err) = self.read(&msg) {
+            let m = OutgoingMessage::closed(
+                msg.subscription.id.as_str(),
+                &format!("get event error: {}", err),
+            );
             self.addr.do_send(ReadEventResult {
                 id: msg.id,
                 sub_id: msg.subscription.id,
-                msg: OutgoingMessage::notice(&format!("get event error: {}", err)),
+                msg: m,
             });
         }
     }
