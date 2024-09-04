@@ -13,7 +13,7 @@ ARG BUILDER_DIR=/srv/rnostr
 ARG BASE=base
 
 # Base image
-FROM rust:1.71.1-slim-bullseye as base
+FROM rust:1.80.1-slim-bullseye as base
 
 # mirror image for china
 FROM base as mirror_cn
