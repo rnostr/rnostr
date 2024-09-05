@@ -20,9 +20,8 @@ FROM base as mirror_cn
 
 # Replace cn mirrors
 ENV RUSTUP_DIST_SERVER=https://rsproxy.cn
-RUN sed -i 's/deb.debian.org/mirrors.163.com/g' /etc/apt/sources.list
-RUN echo '[source.crates-io]\nreplace-with = "mirror"\n[source.mirror]\nregistry = "https://rsproxy.cn/crates.io-index"' \
-        >> $CARGO_HOME/config
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+RUN echo '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n[source.rsproxy]\nregistry = "https://rsproxy.cn/crates.io-index"\n[source.rsproxy-sparse]\nregistry = "sparse+https://rsproxy.cn/index/"\n[registries.rsproxy]\nindex = "https://rsproxy.cn/crates.io-index"' >> $CARGO_HOME/config.toml
 
 FROM ${BASE} as chef
 
