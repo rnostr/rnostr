@@ -270,7 +270,7 @@ mod tests {
         {
             let text = r#"["UNKNOWN"]"#.to_owned();
             let msg = serde_json::from_str::<IncomingMessage>(&text)?;
-            let client_msg = ClientMessage { id, text, msg };
+            let client_msg = ClientMessage::new(id, text, msg);
             server.send(client_msg).await?;
             sleep(Duration::from_millis(50)).await;
             {
@@ -285,7 +285,7 @@ mod tests {
         {
             let text = r#"["REQ", "1", {}]"#.to_owned();
             let msg = serde_json::from_str::<IncomingMessage>(&text)?;
-            let client_msg = ClientMessage { id, text, msg };
+            let client_msg = ClientMessage::new(id, text, msg);
             server.send(client_msg).await?;
             sleep(Duration::from_millis(50)).await;
             {
@@ -298,7 +298,7 @@ mod tests {
             // write
             let text = format!(r#"["EVENT", {}]"#, note);
             let msg = serde_json::from_str::<IncomingMessage>(&text)?;
-            let client_msg = ClientMessage { id, text, msg };
+            let client_msg = ClientMessage::new(id, text, msg);
             server.send(client_msg.clone()).await?;
             sleep(Duration::from_millis(200)).await;
             {
@@ -324,7 +324,7 @@ mod tests {
             {
                 let text = format!(r#"["EVENT", {}]"#, ephemeral_note);
                 let msg = serde_json::from_str::<IncomingMessage>(&text)?;
-                let client_msg = ClientMessage { id, text, msg };
+                let client_msg = ClientMessage::new(id, text, msg);
                 server.send(client_msg.clone()).await?;
                 sleep(Duration::from_millis(200)).await;
                 {
@@ -351,7 +351,7 @@ mod tests {
 
             let text = r#"["CLOSE", "1"]"#.to_owned();
             let msg = serde_json::from_str::<IncomingMessage>(&text)?;
-            let client_msg = ClientMessage { id, text, msg };
+            let client_msg = ClientMessage::new(id, text, msg);
             server.send(client_msg).await?;
             sleep(Duration::from_millis(50)).await;
             {
@@ -366,7 +366,7 @@ mod tests {
         {
             let text = r#"["REQ", "1", {}]"#.to_owned();
             let msg = serde_json::from_str::<IncomingMessage>(&text)?;
-            let client_msg = ClientMessage { id, text, msg };
+            let client_msg = ClientMessage::new(id, text, msg);
             server.send(client_msg).await?;
             sleep(Duration::from_millis(50)).await;
             {

@@ -35,6 +35,19 @@ pub struct ClientMessage {
     pub text: String,
     /// parsed message
     pub msg: IncomingMessage,
+    /// is nip70 checked
+    pub nip70_checked: bool,
+}
+
+impl ClientMessage {
+    pub fn new(id: usize, text: String, msg: IncomingMessage) -> Self {
+        Self {
+            id,
+            text,
+            msg,
+            nip70_checked: false,
+        }
+    }
 }
 
 macro_rules! check_max {
@@ -54,6 +67,21 @@ macro_rules! check_min {
 }
 
 impl ClientMessage {
+    pub fn validate_nip70(&self) -> Result<(), Error> {
+        if !self.nip70_checked {
+            if let IncomingMessage::Event(event) = &self.msg {
+                for tag in event.tags() {
+                    if tag.len() == 1 && tag[0] == "-" {
+                        return Err(Error::Invalid(
+                            "blocked: event marked as protected".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&mut self, limitation: &Limitation) -> Result<(), Error> {
         check_max!(self.text.as_bytes().len(), limitation.max_message_length);
 
@@ -457,6 +485,38 @@ mod tests {
         // let msg = OutgoingMessage("id".to_owned(), Some(event));
         // let json = msg.to_string();
         // assert!(json.starts_with(r#"["EVENT","id",{"#));
+        Ok(())
+    }
+
+    #[test]
+    fn validate() -> Result<()> {
+        let msg: IncomingMessage = serde_json::from_str(
+            r#"["EVENT", {
+            "content": "Good morning everyone 😃",
+            "created_at": 1680690006,
+            "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d",
+            "kind": 1,
+            "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+            "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+            "tags": [["t", "nostr"], ["expiration", "1"], ["delegation", "8e0d3d3eb2881ec137a11debe736a9086715a8c8beeeda615780064d68bc25dd"]]
+          }]"#,
+        )?;
+        let msg = ClientMessage::new(1, "text".to_string(), msg);
+        assert!(msg.validate_nip70().is_ok());
+
+        let msg: IncomingMessage = serde_json::from_str(
+            r#"["EVENT", {
+            "content": "Good morning everyone 😃",
+            "created_at": 1680690006,
+            "id": "332747c0fab8a1a92def4b0937e177be6df4382ce6dd7724f86dc4710b7d4d7d",
+            "kind": 1,
+            "pubkey": "7abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+            "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
+            "tags": [["t", "nostr"], ["-"], ["expiration", "1"], ["delegation", "8e0d3d3eb2881ec137a11debe736a9086715a8c8beeeda615780064d68bc25dd"]]
+          }]"#,
+        )?;
+        let msg = ClientMessage::new(1, "text".to_string(), msg);
+        assert!(msg.validate_nip70().is_err());
         Ok(())
     }
 }

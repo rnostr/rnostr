@@ -103,6 +103,25 @@ impl Session {
         });
     }
 
+    fn send_error(
+        &self,
+        err: crate::Error,
+        msg: &ClientMessage,
+        ctx: &mut ws::WebsocketContext<Self>,
+    ) {
+        if let IncomingMessage::Event(event) = &msg.msg {
+            ctx.text(OutgoingMessage::ok(
+                &event.id_str(),
+                false,
+                &err.to_string(),
+            ));
+        } else if let IncomingMessage::Req(sub) = &msg.msg {
+            ctx.text(OutgoingMessage::closed(&sub.id, &err.to_string()));
+        } else {
+            ctx.text(OutgoingMessage::notice(&err.to_string()));
+        }
+    }
+
     fn handle_message(&mut self, text: String, ctx: &mut ws::WebsocketContext<Self>) {
         let msg = serde_json::from_str::<IncomingMessage>(&text);
         match msg {
@@ -112,25 +131,11 @@ impl Session {
                     counter!("nostr_relay_message_total", "command" => cmd).increment(1);
                 }
 
-                let mut msg = ClientMessage {
-                    id: self.id,
-                    text,
-                    msg,
-                };
+                let mut msg = ClientMessage::new(self.id, text, msg);
                 {
                     let r = self.app.setting.read();
                     if let Err(err) = msg.validate(&r.limitation) {
-                        if let IncomingMessage::Event(event) = &msg.msg {
-                            ctx.text(OutgoingMessage::ok(
-                                &event.id_str(),
-                                false,
-                                &err.to_string(),
-                            ));
-                        } else if let IncomingMessage::Req(sub) = &msg.msg {
-                            ctx.text(OutgoingMessage::closed(&sub.id, &err.to_string()));
-                        } else {
-                            ctx.text(OutgoingMessage::notice(&err.to_string()));
-                        }
+                        self.send_error(err, &msg, ctx);
                         return;
                     }
                 }
@@ -143,6 +148,10 @@ impl Session {
                     .call_message(msg, self, ctx)
                 {
                     crate::ExtensionMessageResult::Continue(msg) => {
+                        if let Err(err) = msg.validate_nip70() {
+                            self.send_error(err, &msg, ctx);
+                            return;
+                        }
                         self.server.do_send(msg);
                     }
                     crate::ExtensionMessageResult::Stop(out) => {

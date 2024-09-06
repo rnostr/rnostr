@@ -24,7 +24,7 @@ fn default_version() -> String {
 }
 
 fn default_nips() -> Vec<u32> {
-    vec![1, 2, 4, 9, 11, 12, 15, 16, 20, 22, 25, 26, 28, 33, 40]
+    vec![1, 2, 4, 9, 11, 12, 15, 16, 20, 22, 25, 26, 28, 33, 40, 70]
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
