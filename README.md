@@ -31,6 +31,7 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 - [x] NIP-42: Authentication of clients to relays
 - [x] NIP-45: Counting results. [experimental](#count)
 - [x] NIP-50: Keywords filter. [experimental](#search)
+- [x] NIP-70: Protected Events
 
 ### Extensions
 
