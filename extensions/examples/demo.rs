@@ -6,18 +6,26 @@ use tracing::info;
 async fn main() -> nostr_relay::Result<()> {
     tracing_subscriber::fmt::init();
     info!("Start relay server");
-    let app_data = App::create(
+    let mut app_data = App::create(
         Some("../rnostr.example.toml"),
         true,
         Some("NOSTR".to_owned()),
         None,
     )?;
-    app_data
-        .add_extension(nostr_extensions::Metrics::new())
-        .add_extension(nostr_extensions::Auth::new())
-        .add_extension(nostr_extensions::Ratelimiter::new())
-        .web_server()?
-        .await?;
+
+    #[cfg(feature = "metrics")]
+    {
+        app_data = app_data.add_extension(nostr_extensions::Metrics::new());
+    }
+
+    app_data = app_data.add_extension(nostr_extensions::Auth::new());
+
+    #[cfg(feature = "rate_limiter")]
+    {
+        app_data = app_data.add_extension(nostr_extensions::Ratelimiter::new());
+    }
+
+    app_data.web_server()?.await?;
     info!("Relay server shutdown");
     Ok(())
 }
