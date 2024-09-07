@@ -72,7 +72,7 @@ impl ClientMessage {
             if let IncomingMessage::Event(event) = &self.msg {
                 for tag in event.tags() {
                     if tag.len() == 1 && tag[0] == "-" {
-                        return Err(Error::Invalid(
+                        return Err(Error::Message(
                             "blocked: event marked as protected".to_owned(),
                         ));
                     }
