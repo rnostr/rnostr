@@ -147,8 +147,11 @@ impl Extension for Auth {
         session: &mut Session,
         _ctx: &mut <Session as actix::Actor>::Context,
     ) -> ExtensionMessageResult {
+        let mut msg = msg;
+
         if self.setting.enabled {
             let state = session.get::<AuthState>();
+            msg.nip70_checked = true;
             match &msg.msg {
                 IncomingMessage::Auth(event) => {
                     if let Some(AuthState::Challenge(challenge)) = state {
@@ -189,6 +192,30 @@ impl Extension for Auth {
                             &format!("auth-required: {}", err),
                         )
                         .into();
+                    } else {
+                        // check nip70 protected event
+                        for tag in event.tags() {
+                            if tag.len() == 1 && tag[0] == "-" {
+                                if let Some(AuthState::Pubkey(pubkey)) = state {
+                                    if pubkey != &event.pubkey_str() {
+                                        return OutgoingMessage::ok(
+                                            &event.id_str(),
+                                            false,
+                                            "auth-required: this event may only be published by its author",
+                                        )
+                                        .into();
+                                    }
+                                } else {
+                                    return OutgoingMessage::ok(
+                                        &event.id_str(),
+                                        false,
+                                        "auth-required: this event require authorization",
+                                    )
+                                    .into();
+                                }
+                                break;
+                            }
+                        }
                     }
                 }
                 IncomingMessage::Req(sub) | IncomingMessage::Count(sub) => {
@@ -554,6 +581,148 @@ mod tests {
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
         assert!(notice.3.contains("auth-required"));
         assert!(!notice.2);
+
+        framed
+            .send(ws::Message::Close(Some(ws::CloseCode::Normal.into())))
+            .await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Close(Some(ws::CloseCode::Normal.into())));
+
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn nip70() -> Result<()> {
+        let mut rng = thread_rng();
+        let key_pair = Keypair::new_global(&mut rng);
+
+        let app = create_test_app("auth-nip70")?;
+        {
+            let mut w = app.setting.write();
+            w.extra = serde_json::from_str(r#"{ "auth": { "enabled": false } }"#)?;
+        }
+        let app = app.add_extension(Auth::new());
+        let app = web::Data::new(app);
+
+        let mut srv = actix_test::start(move || create_web_app(app.clone()));
+
+        // client service
+        let mut framed = srv.ws_at("/").await.unwrap();
+
+        // protected event
+        let event = Event::create(
+            &key_pair,
+            now(),
+            1,
+            vec![vec!["-".to_owned()]],
+            "test".to_owned(),
+        )?;
+        framed
+            .send(ws::Message::Text(
+                format!(r#"["EVENT", {}]"#, event.to_string()).into(),
+            ))
+            .await?;
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(!notice.2);
+        assert!(notice.3.contains("blocked"));
+
+        framed
+            .send(ws::Message::Close(Some(ws::CloseCode::Normal.into())))
+            .await?;
+        let item = framed.next().await.unwrap()?;
+        assert_eq!(item, ws::Frame::Close(Some(ws::CloseCode::Normal.into())));
+
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn nip70_with_auth() -> Result<()> {
+        let mut rng = thread_rng();
+        let key_pair = Keypair::new_global(&mut rng);
+        let key_pair1 = Keypair::new_global(&mut rng);
+
+        // let pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
+
+        let app = create_test_app("auth-nip70-auth")?;
+        {
+            let mut w = app.setting.write();
+            w.extra = serde_json::from_str(r#"{ "auth": { "enabled": true } }"#)?;
+        }
+        let app = app.add_extension(Auth::new());
+        let app = web::Data::new(app);
+
+        let mut srv = actix_test::start(move || create_web_app(app.clone()));
+
+        // client service
+        let mut framed = srv.ws_at("/").await.unwrap();
+
+        let item = framed.next().await.unwrap()?;
+        assert!(matches!(item, ws::Frame::Text(_)));
+        let state: (String, String) = parse_text(&item)?;
+        assert_eq!(state.0, "AUTH");
+
+        // protected event without auth
+        let event = Event::create(
+            &key_pair,
+            now(),
+            1,
+            vec![vec!["-".to_owned()]],
+            "test".to_owned(),
+        )?;
+        framed
+            .send(ws::Message::Text(
+                format!(r#"["EVENT", {}]"#, event.to_string()).into(),
+            ))
+            .await?;
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(!notice.2);
+        assert!(notice.3.contains("authorization"));
+
+        let event = Event::create(
+            &key_pair,
+            now(),
+            22242,
+            vec![vec!["challenge".to_owned(), state.1.clone()]],
+            "".to_owned(),
+        )?;
+        framed
+            .send(ws::Message::Text(
+                format!(r#"["AUTH", {}]"#, event.to_string()).into(),
+            ))
+            .await?;
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.2);
+
+        let event = Event::create(
+            &key_pair1,
+            now(),
+            1,
+            vec![vec!["-".to_owned()]],
+            "test".to_owned(),
+        )?;
+        framed
+            .send(ws::Message::Text(
+                format!(r#"["EVENT", {}]"#, event.to_string()).into(),
+            ))
+            .await?;
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(!notice.2);
+        assert!(notice.3.contains("author"));
+
+        let event = Event::create(
+            &key_pair,
+            now(),
+            1,
+            vec![vec!["-".to_owned()]],
+            "test".to_owned(),
+        )?;
+        framed
+            .send(ws::Message::Text(
+                format!(r#"["EVENT", {}]"#, event.to_string()).into(),
+            ))
+            .await?;
+        let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(notice.2);
 
         framed
             .send(ws::Message::Close(Some(ws::CloseCode::Normal.into())))
