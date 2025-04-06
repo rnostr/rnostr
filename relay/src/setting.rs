@@ -103,6 +103,9 @@ pub struct Network {
 
     /// redirect to other site when user access the http index page
     pub index_redirect_to: Option<String>,
+
+    /// redirect to favicon url when clients access the http favicon.ico path
+    pub favicon_redirect_to: Option<String>,
 }
 
 impl Default for Network {
@@ -114,6 +117,7 @@ impl Default for Network {
             heartbeat_timeout: Duration::from_secs(120).try_into().unwrap(),
             real_ip_header: None,
             index_redirect_to: None,
+            favicon_redirect_to: None,
         }
     }
 }
