@@ -17,6 +17,7 @@ pub struct Permission {
     pub pubkey_blacklist: Option<List>,
     pub event_pubkey_whitelist: Option<List>,
     pub event_pubkey_blacklist: Option<List>,
+    pub allow_mentioning_whitelisted_pubkeys: bool,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -69,6 +70,7 @@ impl Auth {
         permission: Option<&Permission>,
         pubkey: Option<&String>,
         event_pubkey: Option<&String>,
+        event_tags: Option<&Vec<Vec<String>>>,
         ip: &String,
     ) -> Result<(), &'static str> {
         if let Some(permission) = permission {
@@ -85,7 +87,18 @@ impl Auth {
 
             if let Some(pubkey) = event_pubkey {
                 if let Some(list) = &permission.event_pubkey_whitelist {
-                    if !list.contains(pubkey) {
+                    let whitelisted_pubkey_is_mentioned =
+                        if permission.allow_mentioning_whitelisted_pubkeys {
+                            let mut event_mentioned_pubkeys = event_tags
+                                .iter()
+                                .flat_map(|i| i.iter())
+                                .filter(|t| t.len() > 1 && t[0] == "p")
+                                .map(|t| &t[1]);
+                            event_mentioned_pubkeys.any(|i| list.contains(i))
+                        } else {
+                            false
+                        };
+                    if !whitelisted_pubkey_is_mentioned && !list.contains(pubkey) {
                         return Err("event author pubkey not in whitelist");
                     }
                 }
@@ -183,6 +196,7 @@ impl Extension for Auth {
                         self.setting.event.as_ref(),
                         state.and_then(|s| s.pubkey()),
                         Some(&event.pubkey_str()),
+                        Some(event.tags()),
                         session.ip(),
                     ) {
                         counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err).increment(1);
@@ -222,6 +236,7 @@ impl Extension for Auth {
                     if let Err(err) = Self::verify_permission(
                         self.setting.req.as_ref(),
                         state.and_then(|s| s.pubkey()),
+                        None,
                         None,
                         session.ip(),
                     ) {
@@ -269,6 +284,7 @@ mod tests {
             }),
             None,
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_ok());
@@ -279,6 +295,7 @@ mod tests {
             }),
             None,
             None,
+            None,
             &"127.0.0.2".to_owned()
         )
         .is_err());
@@ -290,6 +307,7 @@ mod tests {
             }),
             None,
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -298,6 +316,7 @@ mod tests {
                 ip_blacklist: Some(vec!["127.0.0.1".to_string()].into()),
                 ..Default::default()
             }),
+            None,
             None,
             None,
             &"127.0.0.2".to_owned()
@@ -311,6 +330,7 @@ mod tests {
             }),
             Some(&"xx".to_owned()),
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_ok());
@@ -321,6 +341,7 @@ mod tests {
             }),
             Some(&"xxxx".to_owned()),
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -332,6 +353,7 @@ mod tests {
             }),
             Some(&"xx".to_owned()),
             None,
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -341,6 +363,7 @@ mod tests {
                 ..Default::default()
             }),
             Some(&"xxxx".to_owned()),
+            None,
             None,
             &"127.0.0.1".to_owned()
         )
@@ -353,6 +376,7 @@ mod tests {
             }),
             None,
             Some(&"xx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_ok());
@@ -363,6 +387,7 @@ mod tests {
             }),
             None,
             Some(&"xxxx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -374,6 +399,7 @@ mod tests {
             }),
             None,
             Some(&"xx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_err());
@@ -384,6 +410,7 @@ mod tests {
             }),
             None,
             Some(&"xxxx".to_owned()),
+            None,
             &"127.0.0.1".to_owned()
         )
         .is_ok());
