@@ -100,9 +100,14 @@ impl ClientMessage {
                 check_max!(sub.id.len(), limitation.max_subid_length);
 
                 for f in &mut sub.filters {
-                    // fill default limit
-                    f.default_limit(limitation.max_limit);
-                    check_max!(f.limit.unwrap(), limitation.max_limit);
+                    // Fill default limit, Override the incoming limit if it is too large
+                    if let Some(limit) = f.limit {
+                        if limit > limitation.max_limit {
+                            f.limit = Some(limitation.max_limit);
+                        }
+                    } else {
+                        f.limit = Some(limitation.max_limit);
+                    }
                     for id in f.ids.iter() {
                         check_min!(id.len(), limitation.min_prefix);
                     }
@@ -517,6 +522,31 @@ mod tests {
         )?;
         let msg = ClientMessage::new(1, "text".to_string(), msg);
         assert!(msg.validate_nip70().is_err());
+
+        let msg: IncomingMessage = serde_json::from_str(r#"["REQ", "sub_id1", {}]"#)?;
+        let mut msg = ClientMessage::new(1, "text".to_string(), msg);
+        let mut limitation = Limitation::default();
+        limitation.max_limit = 300;
+
+        msg.validate(&limitation).unwrap();
+        assert!(
+            matches!(msg.msg, IncomingMessage::Req(sub) if sub.filters.get(0).unwrap().limit.unwrap() == 300)
+        );
+
+        let msg: IncomingMessage = serde_json::from_str(r#"["REQ", "sub_id1", {"limit": 400}]"#)?;
+        let mut msg = ClientMessage::new(1, "text".to_string(), msg);
+        msg.validate(&limitation).unwrap();
+        assert!(
+            matches!(msg.msg, IncomingMessage::Req(sub) if sub.filters.get(0).unwrap().limit.unwrap() == 300)
+        );
+
+        let msg: IncomingMessage = serde_json::from_str(r#"["REQ", "sub_id1", {"limit": 200}]"#)?;
+        let mut msg = ClientMessage::new(1, "text".to_string(), msg);
+        msg.validate(&limitation).unwrap();
+        assert!(
+            matches!(msg.msg, IncomingMessage::Req(sub) if sub.filters.get(0).unwrap().limit.unwrap() == 200)
+        );
+
         Ok(())
     }
 }
