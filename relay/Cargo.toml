@@ -1,6 +1,6 @@
 [package]
 name = "nostr-relay"
-version = "0.4.7"
+version = "0.4.8"
 description = "A high-performance and scalable nostr relay library."
 keywords = ["nostr", "nostr-relay"]
 edition.workspace = true
