@@ -32,6 +32,9 @@ port = 8080
 # redirect to other site when user access the http index page
 # index_redirect_to = "https://example.com"
 
+# redirect to favicon url when clients access the http favicon.ico path
+# favicon_redirect_to = "https://example.com/favicon.ico"
+
 # heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
 # How long before lack of client response causes a timeout
 # heartbeat_timeout = "2m"
