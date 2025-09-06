@@ -32,6 +32,7 @@ fn default_nips() -> Vec<u32> {
 pub struct Information {
     pub name: String,
     pub description: String,
+    pub icon: Option<String>,
     pub pubkey: Option<String>,
     pub contact: Option<String>,
     pub software: String,
@@ -46,6 +47,7 @@ impl Default for Information {
         Self {
             name: Default::default(),
             description: Default::default(),
+            icon: Default::default(),
             pubkey: Default::default(),
             contact: Default::default(),
             software: Default::default(),
@@ -343,6 +345,7 @@ impl Setting {
         let mut val = json!({
             "name": info.name,
             "description": info.description,
+            "icon": info.icon,
             "pubkey": info.pubkey,
             "contact": info.contact,
             "software": info.software,

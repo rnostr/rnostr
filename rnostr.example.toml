@@ -2,10 +2,12 @@
 # All duration format reference https://docs.rs/duration-str/latest/duration_str/
 #
 # config relay information
+# https://github.com/nostr-protocol/nips/blob/master/11.md
 [information]
 name = "rnostr"
 description = "A high-performance and scalable nostr relay written in Rust."
 software = "https://github.com/rnostr/rnostr"
+# icon = ""
 # pubkey = ""
 # contact = ""
 
