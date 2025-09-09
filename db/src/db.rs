@@ -390,11 +390,11 @@ impl Db {
         })
     }
 
-    pub fn writer(&self) -> Result<Writer> {
+    pub fn writer(&'_ self) -> Result<Writer<'_>> {
         Ok(self.inner.writer()?)
     }
 
-    pub fn reader(&self) -> Result<Reader> {
+    pub fn reader(&'_ self) -> Result<Reader<'_>> {
         Ok(self.inner.reader()?)
     }
 

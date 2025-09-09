@@ -106,7 +106,7 @@ pub trait Transaction: Sized {
         iter
     }
 
-    fn iter(&self, tree: &Tree) -> Iter {
+    fn iter(&'_ self, tree: &Tree) -> Iter<'_> {
         self.iter_from(tree, Bound::Unbounded::<Vec<u8>>, false)
     }
 }
@@ -359,7 +359,7 @@ unsafe impl Send for DbInner {}
 unsafe impl Sync for DbInner {}
 
 impl Db {
-    pub fn writer(&self) -> Result<Writer> {
+    pub fn writer(&'_ self) -> Result<Writer<'_>> {
         Writer::new(&self.inner)
     }
 
@@ -387,7 +387,7 @@ impl Db {
         })
     }
 
-    pub fn reader(&self) -> Result<Reader> {
+    pub fn reader(&'_ self) -> Result<Reader<'_>> {
         Reader::new(&self.inner)
     }
 
