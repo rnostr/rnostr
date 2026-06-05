@@ -38,7 +38,7 @@ impl Writer {
         if !self.events.is_empty() {
             let start = Instant::now();
             let mut writer = self.db.writer()?;
-            while let Some(event) = self.events.pop() {
+            for event in self.events.drain(..) {
                 let res = self.db.put(&mut writer, &event.event);
                 debug!(
                     "write event: {} {} {:?}",
