@@ -19,16 +19,31 @@ anyhow = "1.0.86"
 clap = { version = "4.5.16", features = ["derive"] }
 clio = { version = "0.3.5", features = ["clap-parse"] }
 indicatif = "0.17.8"
-nostr-db = { version = "0.4.5", path = "./db", features = ["search"] }
-nostr-relay = { version = "0.4.9", path = "./relay", features = ["search"] }
-nostr-extensions = { version = "0.4.9", path = "./extensions" }
+nostr-db = { version = "0.4.5", path = "./db", default-features = false, features = ["search"] }
+nostr-relay = { version = "0.4.9", path = "./relay", default-features = false, features = ["search"] }
+nostr-extensions = { version = "0.4.9", path = "./extensions", default-features = false, features = [
+    "metrics",
+    "rate_limiter",
+    "count",
+    "search",
+] }
 rayon = "1.10.0"
 thiserror = "1.0.63"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 
-# [features]
-# zstd = ["nostr-db/zstd"]
+[features]
+default = ["search-japanese", "search-korean"]
+search-japanese = [
+    "nostr-db/search-japanese",
+    "nostr-relay/search-japanese",
+    "nostr-extensions/search-japanese",
+]
+search-korean = [
+    "nostr-db/search-korean",
+    "nostr-relay/search-korean",
+    "nostr-extensions/search-korean",
+]
 
 [workspace]
 

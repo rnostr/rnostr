@@ -23,7 +23,7 @@ config = { version = "0.14.0", features = [
 duration-str = { version = "0.11.2", default-features = false }
 hex = "0.4.3"
 metrics = "0.23.0"
-nostr-db = { version = "0.4.5", path = "../db" }
+nostr-db = { version = "0.4.5", path = "../db", default-features = false }
 notify = "6.1.1"
 num_cpus = "1.16.0"
 parking_lot = "0.12.3"
@@ -34,7 +34,10 @@ tracing = "0.1.40"
 bytes = "1.7.1"
 
 [features]
+default = ["search-japanese", "search-korean"]
 search = ["nostr-db/search"]
+search-japanese = ["nostr-db/search-japanese"]
+search-korean = ["nostr-db/search-korean"]
 
 [dev-dependencies]
 actix-rt = "2.10.0"

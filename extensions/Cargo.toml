@@ -11,7 +11,7 @@ authors.workspace = true
 
 [dependencies]
 
-nostr-relay = { version = "0.4.9", path = "../relay" }
+nostr-relay = { version = "0.4.9", path = "../relay", default-features = false }
 metrics = "0.23.0"
 metrics-exporter-prometheus = { version = "0.15.3", optional = true, default-features = false, features = [
     "push-gateway",
@@ -27,8 +27,17 @@ tracing = "0.1.40"
 governor = { version = "0.6.3", optional = true }
 
 [features]
-default = ["metrics", "rate_limiter", "count", "search"]
+default = [
+    "metrics",
+    "rate_limiter",
+    "count",
+    "search",
+    "search-japanese",
+    "search-korean",
+]
 search = ["nostr-relay/search"]
+search-japanese = ["nostr-relay/search-japanese"]
+search-korean = ["nostr-relay/search-korean"]
 metrics = ["metrics-exporter-prometheus", "metrics-util"]
 rate_limiter = ["governor"]
 count = []
