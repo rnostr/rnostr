@@ -26,3 +26,11 @@ fields need nothing. Boolean and numeric fields need
 accept overrides such as `RNOSTR_MYEXT__MAX=5`; without it the override makes the
 section fail to parse. The adapter also accepts quoted values in files, such as
 `limit = "10"`.
+
+Reject requests with `msg.reject(reason)` so the dispatcher sends an error and
+closes any associated reconciliation. `Stop(reply)` and `Ignore` mark requests as
+handled, including asynchronous work. `Extensions::call_message` sends handled
+replies and returns unhandled requests as `Option<ClientMessage>`.
+
+The next release adds `IncomingMessage::NegMsg`, `NegClose`, and
+`ExtensionMessageResult::Reject`; update exhaustive matches when upgrading.

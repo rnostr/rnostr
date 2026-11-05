@@ -4,7 +4,7 @@ use nostr_relay::{
 };
 use serde::Deserialize;
 
-#[derive(Deserialize, Default, Debug)]
+#[derive(Deserialize, Default, Debug, Clone)]
 #[serde(default, deny_unknown_fields)]
 pub struct SearchSetting {
     #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
@@ -29,6 +29,7 @@ impl Extension for Search {
 
     fn setting<'a>(&'a mut self, setting: &mut Setting) -> Result<SettingUpdate<'a>> {
         let parsed: SearchSetting = setting.parse_extension(self.name())?;
+        setting.set_extension(parsed.clone());
         if parsed.enabled {
             setting.add_nip(50);
         }
