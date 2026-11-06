@@ -95,6 +95,22 @@ cargo build --release
 
 ```
 
+Japanese and Korean search tokenization are enabled by default. Their dictionaries
+are downloaded by Lindera build scripts during compilation. To build without
+these downloads, while keeping search and the other relay extensions enabled:
+
+```shell
+cargo build --release --no-default-features
+```
+
+Enable either language separately with `--features search-japanese` or
+`--features search-korean`; those features require the corresponding dictionary
+downloads. `--offline` only controls Cargo itself, so it does not prevent build
+scripts from downloading dictionaries when these features are enabled.
+
+When building or testing the whole workspace, also use `--no-default-features`
+to prevent benchmark defaults from enabling the dictionaries.
+
 ### Docker
 
 ```shell

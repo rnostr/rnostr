@@ -23,9 +23,11 @@ jobs:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
         args:
           [
+            -p rnostr --no-default-features,
             -p nostr-kv,
             -p nostr-db --no-default-features,
             -p nostr-db --features search,
+            -p nostr-db --no-default-features --features search,
             -p nostr-db --features zstd,
             -p nostr-relay,
             -p nostr-extensions,
