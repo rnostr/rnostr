@@ -119,20 +119,6 @@ impl ClientMessage {
     }
 }
 
-// #[derive(Deserialize, Clone, Debug)]
-// #[serde(rename_all = "UPPERCASE", tag = "0")]
-// pub enum IncomingMessage {
-//     Event {
-//         event: Event,
-//     },
-//     Close {
-//         id: String,
-//     },
-//     Req(Subscription),
-//     #[serde(other, deserialize_with = "ignore_contents")]
-//     Unknown,
-// }
-
 /// Parsed incoming messages from a client
 #[derive(Clone, Debug)]
 pub enum IncomingMessage {
@@ -232,54 +218,12 @@ impl<'de> Deserialize<'de> for IncomingMessage {
     }
 }
 
-// fn ignore_contents<'de, D>(deserializer: D) -> Result<(), D::Error>
-// where
-//     D: Deserializer<'de>,
-// {
-//     // Ignore any content at this part of the json structure
-//     let _ = deserializer.deserialize_ignored_any(serde::de::IgnoredAny);
-//     // Return unit as our 'Unknown' variant has no args
-//     Ok(())
-// }
-
 /// Subscription
 #[derive(Clone, Debug)]
 pub struct Subscription {
     pub id: String,
     pub filters: Vec<Filter>,
 }
-
-// https://github.com/serde-rs/serde/issues/1337
-// prefix
-// impl<'de> Deserialize<'de> for Subscription {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//     where
-//         D: Deserializer<'de>,
-//     {
-//         struct PrefixVisitor(PhantomData<()>);
-
-//         impl<'de> Visitor<'de> for PrefixVisitor {
-//             type Value = Subscription;
-
-//             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-//                 formatter.write_str("sequence")
-//             }
-
-//             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-//             where
-//                 A: SeqAccess<'de>,
-//             {
-//                 let t = seq
-//                     .next_element()?
-//                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-//                 let r = Vec::<Filter>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-//                 Ok(Subscription { id: t, filters: r })
-//             }
-//         }
-
-//         deserializer.deserialize_seq(PrefixVisitor(PhantomData))
-//     }
-// }
 
 /// The message sent to the client
 #[derive(Message, Clone, Debug)]
@@ -315,12 +259,6 @@ impl Display for OutgoingMessage {
     }
 }
 
-// impl Into<ByteString> for OutgoingMessage {
-//     fn into(self) -> ByteString {
-//         ByteString::from(self.0)
-//     }
-// }
-
 impl From<OutgoingMessage> for ByteString {
     fn from(val: OutgoingMessage) -> Self {
         ByteString::from(val.0)
@@ -348,11 +286,6 @@ pub enum WriteEventResult {
         msg: OutgoingMessage,
     },
 }
-// pub struct WriteEventResult {
-//     pub id: usize,
-//     pub event: Event,
-//     pub result: CheckEventResult,
-// }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
@@ -433,10 +366,6 @@ mod tests {
         )?;
         assert!(matches!(msg, IncomingMessage::Event( ref event ) if event.kind() == 1));
 
-        // let sub: Subscription = serde_json::from_str(r#"["sub_id1", {}, {}]"#)?;
-        // assert_eq!(sub.id, "sub_id1");
-        // assert_eq!(sub.filters.len(), 2);
-
         // req
         let msg: IncomingMessage = serde_json::from_str(r#"["REQ", "sub_id1", {}]"#)?;
         assert!(matches!(msg, IncomingMessage::Req(sub) if sub.id == "sub_id1"));
@@ -486,10 +415,6 @@ mod tests {
         let json = msg.to_string();
         assert_eq!(json, r#"["CLOSED","1","hello"]"#);
 
-        // let event = Event::default();
-        // let msg = OutgoingMessage("id".to_owned(), Some(event));
-        // let json = msg.to_string();
-        // assert!(json.starts_with(r#"["EVENT","id",{"#));
         Ok(())
     }
 
