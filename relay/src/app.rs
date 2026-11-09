@@ -95,6 +95,22 @@ pub mod route {
             Ok(HttpResponse::Ok().body(s.information.description.clone()))
         }
     }
+
+    pub async fn favicon(
+        _req: HttpRequest,
+        _stream: web::Payload,
+        data: web::Data<App>,
+    ) -> Result<HttpResponse, Error> {
+        let s = data.setting.read();
+        if let Some(site) = &s.network.favicon_redirect_to {
+            Ok(HttpResponse::Found()
+                .append_header((LOCATION, site.as_str()))
+                .finish())
+        } else {
+            Ok(HttpResponse::NotFound().body("favicon not found"))
+        }
+    }
+
 }
 
 /// App with data
@@ -227,6 +243,7 @@ pub fn create_web_app(
             extensions.write().call_config_web(cfg);
         })
         .service(web::resource("/").route(web::get().to(route::index)))
+        .service(web::resource("/favicon.ico").route(web::get().to(route::favicon)))
         .wrap(
             Cors::default()
                 .send_wildcard()
