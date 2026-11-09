@@ -163,7 +163,9 @@ impl Db {
         // replacement index
         if let Some(k) = encode_replace_key(index_event.kind(), index_event.pubkey(), event.tags())
         {
-            writer.del(&self.t_replacement, k, None)?;
+            if writer.get(&self.t_replacement, &k)? == Some(uid) {
+                writer.del(&self.t_replacement, k, None)?;
+            }
         }
 
         // expiration
@@ -1179,6 +1181,62 @@ mod tests {
             .get::<String, _, _>(&db.reader().unwrap(), events[0].id())
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn deleting_a_legacy_event_preserves_another_events_replacement_entry() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let db = Db::open(root.path())?;
+        let event = |id: u8, tags| {
+            Event::new(
+                [id; 32],
+                [42; 32],
+                id as u64,
+                30078,
+                tags,
+                String::new(),
+                [0; 64],
+            )
+            .unwrap()
+        };
+        let stale = event(
+            1,
+            vec![
+                vec!["alt".into(), "text".into()],
+                vec!["d".into(), "profile".into()],
+            ],
+        );
+        let live = event(2, vec![vec!["d".into(), "profile".into()]]);
+        let update = event(3, live.tags().clone());
+        let stale_uid = u64_to_ver(db.seq.fetch_add(1, Ordering::Relaxed));
+        let live_uid = u64_to_ver(db.seq.fetch_add(1, Ordering::Relaxed));
+        let replacement = encode_replace_key(live.kind(), live.pubkey(), live.tags());
+        {
+            let mut writer = db.writer()?;
+            // The old lookup indexed a non-leading d tag under the empty identifier.
+            db.put_event(
+                &mut writer,
+                &stale,
+                &stale_uid,
+                &encode_replace_key(stale.kind(), stale.pubkey(), &[]),
+            )?;
+            db.put_event(&mut writer, &live, &live_uid, &replacement)?;
+            db.commit(writer)?;
+        }
+        db.batch_del([stale.id()])?;
+        {
+            let reader = db.reader()?;
+            assert_eq!(
+                reader.get(&db.t_replacement, replacement.as_ref().unwrap())?,
+                Some(live_uid.as_slice())
+            );
+            assert!(db.get::<String, _, _>(&reader, stale.id())?.is_none());
+        }
+        db.batch_put([&update])?;
+        let reader = db.reader()?;
+        assert!(db.get::<String, _, _>(&reader, live.id())?.is_none());
+        assert!(db.get::<String, _, _>(&reader, update.id())?.is_some());
+        Ok(())
     }
 
     #[test]
