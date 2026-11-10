@@ -30,7 +30,7 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 }
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
-const DB_VERSION: &str = "3";
+const DB_VERSION: &str = "4";
 
 #[derive(Clone)]
 pub struct Db {
@@ -163,7 +163,9 @@ impl Db {
         // replacement index
         if let Some(k) = encode_replace_key(index_event.kind(), index_event.pubkey(), event.tags())
         {
-            writer.del(&self.t_replacement, k, None)?;
+            if writer.get(&self.t_replacement, &k)? == Some(uid) {
+                writer.del(&self.t_replacement, k, None)?;
+            }
         }
 
         // expiration
@@ -1113,7 +1115,129 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::upper;
+    use super::*;
+
+    #[test]
+    fn legacy_replacement_schema_requires_reimport() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Db::open(root.path()).unwrap();
+        db.check_schema().unwrap();
+        let mut writer = db.writer().unwrap();
+        writer.put(&db.t_meta, "version", "3").unwrap();
+        db.commit(writer).unwrap();
+        assert!(matches!(db.check_schema(), Err(Error::VersionMismatch)));
+        assert_eq!(
+            db.reader().unwrap().get(&db.t_meta, "version").unwrap(),
+            Some(b"3".as_slice())
+        );
+    }
+
+    #[test]
+    fn addressable_replacement_preserves_distinct_identifiers() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Db::open(root.path()).unwrap();
+        let tags = |value: &str| vec![vec!["d".into(), value.into()]];
+        let events: Vec<_> = [
+            vec![
+                vec!["alt".into(), "text".into()],
+                vec!["d".into(), "profile".into()],
+            ],
+            tags("settings"),
+            tags("profile"),
+            vec![],
+            vec![vec!["d".into()]],
+            tags(""),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, tags)| {
+            Event::new(
+                [i as u8; 32],
+                [42; 32],
+                i as u64 + 1,
+                30078,
+                tags,
+                String::new(),
+                [0; 64],
+            )
+            .unwrap()
+        })
+        .collect();
+        db.batch_put(&events).unwrap();
+        {
+            let reader = db.reader().unwrap();
+            for (i, event) in events.iter().enumerate() {
+                assert_eq!(
+                    db.get::<String, _, _>(&reader, event.id())
+                        .unwrap()
+                        .is_some(),
+                    [1, 2, 5].contains(&i)
+                );
+            }
+        }
+        db.batch_del([events[2].id()]).unwrap();
+        db.batch_put([&events[0]]).unwrap();
+        assert!(db
+            .get::<String, _, _>(&db.reader().unwrap(), events[0].id())
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn deleting_a_legacy_event_preserves_another_events_replacement_entry() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let db = Db::open(root.path())?;
+        let event = |id: u8, tags| {
+            Event::new(
+                [id; 32],
+                [42; 32],
+                id as u64,
+                30078,
+                tags,
+                String::new(),
+                [0; 64],
+            )
+            .unwrap()
+        };
+        let stale = event(
+            1,
+            vec![
+                vec!["alt".into(), "text".into()],
+                vec!["d".into(), "profile".into()],
+            ],
+        );
+        let live = event(2, vec![vec!["d".into(), "profile".into()]]);
+        let update = event(3, live.tags().clone());
+        let stale_uid = u64_to_ver(db.seq.fetch_add(1, Ordering::Relaxed));
+        let live_uid = u64_to_ver(db.seq.fetch_add(1, Ordering::Relaxed));
+        let replacement = encode_replace_key(live.kind(), live.pubkey(), live.tags());
+        {
+            let mut writer = db.writer()?;
+            // The old lookup indexed a non-leading d tag under the empty identifier.
+            db.put_event(
+                &mut writer,
+                &stale,
+                &stale_uid,
+                &encode_replace_key(stale.kind(), stale.pubkey(), &[]),
+            )?;
+            db.put_event(&mut writer, &live, &live_uid, &replacement)?;
+            db.commit(writer)?;
+        }
+        db.batch_del([stale.id()])?;
+        {
+            let reader = db.reader()?;
+            assert_eq!(
+                reader.get(&db.t_replacement, replacement.as_ref().unwrap())?,
+                Some(live_uid.as_slice())
+            );
+            assert!(db.get::<String, _, _>(&reader, stale.id())?.is_none());
+        }
+        db.batch_put([&update])?;
+        let reader = db.reader()?;
+        assert!(db.get::<String, _, _>(&reader, live.id())?.is_none());
+        assert!(db.get::<String, _, _>(&reader, update.id())?.is_some());
+        Ok(())
+    }
 
     #[test]
     pub fn test_upper_fn() {

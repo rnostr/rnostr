@@ -103,6 +103,18 @@ pub fn u16_to_ver(num: u16) -> Vec<u8> {
     num.to_be_bytes().to_vec()
 }
 
+/// Kind range whose replacement keys include a d-tag identifier.
+pub const ADDRESSABLE_KINDS: std::ops::Range<u16> = 30_000..40_000;
+
+/// The first d tag determines the identifier; missing values are empty.
+pub fn event_identifier(tags: &[Vec<String>]) -> &str {
+    tags.iter()
+        .find(|tag| tag.first().is_some_and(|name| name == "d"))
+        .and_then(|tag| tag.get(1))
+        .map(String::as_str)
+        .unwrap_or_default()
+}
+
 // Replaceable Events [NIP-16](https://nips.be/16)
 // Parameterized Replaceable Events [NIP-33](https://nips.be/33)
 pub fn encode_replace_key(kind: u16, pubkey: &[u8; 32], tags: &[Vec<String>]) -> Option<Vec<u8>> {
@@ -110,19 +122,10 @@ pub fn encode_replace_key(kind: u16, pubkey: &[u8; 32], tags: &[Vec<String>]) ->
         let k = u16_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
         Some([p, &k[..]].concat())
-    } else if (30_000..40_000).contains(&kind) {
+    } else if ADDRESSABLE_KINDS.contains(&kind) {
         let k = u16_to_ver(kind);
         let p: &[u8] = pubkey.as_ref();
-        let tag = tags
-            .get(0)
-            .map(|tag| {
-                if tag.len() > 1 && tag[0] == "d" {
-                    tag.get(1).unwrap().clone()
-                } else {
-                    "".to_owned()
-                }
-            })
-            .unwrap_or_default();
+        let tag = event_identifier(tags);
         Some([p, &k[..], tag.as_bytes()].concat())
     } else {
         None
@@ -240,5 +243,45 @@ mod tests {
         assert_eq!(r.1, 30001);
         assert_eq!(r.2, "m".as_bytes());
         assert_eq!(r.3, 10);
+    }
+
+    #[test]
+    fn addressable_keys_use_the_first_d_tag_and_default_to_empty() {
+        for (tags, identifier) in [
+            (vec![], ""),
+            (vec![vec![]], ""),
+            (vec![vec!["d".into()]], ""),
+            (vec![vec!["d".into(), "".into()]], ""),
+            (
+                vec![
+                    vec!["alt".into(), "text".into()],
+                    vec!["d".into(), "profile".into()],
+                ],
+                "profile",
+            ),
+            (
+                vec![
+                    vec!["d".into(), "profile".into()],
+                    vec!["d".into(), "other".into()],
+                ],
+                "profile",
+            ),
+            (
+                vec![vec!["d".into()], vec!["d".into(), "profile".into()]],
+                "",
+            ),
+        ] {
+            let key = encode_replace_key(30078, &[1; 32], &tags).unwrap();
+            assert_eq!(
+                decode_replace_key(&key, &u64_to_ver(1)).unwrap().2,
+                identifier.as_bytes()
+            );
+        }
+        for (kind, addressable) in [(29999, false), (30000, true), (39999, true), (40000, false)] {
+            assert_eq!(
+                encode_replace_key(kind, &[1; 32], &[]).is_some(),
+                addressable
+            );
+        }
     }
 }

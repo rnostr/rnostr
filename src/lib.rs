@@ -254,6 +254,7 @@ pub fn export<F: Fn(usize)>(
 
 pub fn delete(path: &PathBuf, filter: &Filter, dry_run: bool) -> Result<usize> {
     let db = Db::open(path)?;
+    db.check_schema()?;
     let reader = db.writer()?;
     let iter = db.iter::<Vec<u8>, _>(&reader, filter)?;
     let ids = iter.collect::<Result<Vec<Vec<u8>>, nostr_db::Error>>()?;
@@ -267,4 +268,38 @@ pub fn delete(path: &PathBuf, filter: &Filter, dry_run: bool) -> Result<usize> {
     }
     db.commit(writer)?;
     Ok(ids.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr_db::kv::lmdb::Transaction;
+
+    #[test]
+    fn delete_rejects_legacy_schema_without_removing_events() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("events");
+        let event = Event::new([1; 32], [2; 32], 1, 1, vec![], String::new(), [0; 64])?;
+        {
+            let db = Db::open(&path)?;
+            db.check_schema()?;
+            db.batch_put([&event])?;
+        }
+        {
+            let db = nostr_db::kv::lmdb::Db::open(&path)?;
+            let meta = db.open_tree(Some("t_meta"), 0)?;
+            let mut writer = db.writer()?;
+            writer.put(&meta, "version", "3")?;
+            writer.commit()?;
+        }
+        for dry_run in [false, true] {
+            assert!(matches!(
+                delete(&path, &Filter::default(), dry_run),
+                Err(Error::Db(nostr_db::Error::VersionMismatch))
+            ));
+        }
+        let db = Db::open(&path)?;
+        assert!(db.get::<String, _, _>(&db.reader()?, event.id())?.is_some());
+        Ok(())
+    }
 }

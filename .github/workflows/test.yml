@@ -31,6 +31,7 @@ jobs:
             -p nostr-db --features zstd,
             -p nostr-relay,
             -p nostr-extensions,
+            -p rnostr,
           ]
     steps:
       - uses: actions/checkout@v3
