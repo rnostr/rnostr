@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     ops::Deref,
     path::{Path, PathBuf},
@@ -181,6 +181,9 @@ pub struct Setting {
     /// nip-11 extension limitation
     #[serde(skip)]
     ext_limitation: HashMap<String, Value>,
+
+    #[serde(skip)]
+    write_restrictions: HashSet<&'static str>,
 }
 
 impl PartialEq for Setting {
@@ -307,6 +310,18 @@ impl Setting {
         self.ext_limitation.insert(key, value);
     }
 
+    /// Track each extension's contribution to NIP-11 `restricted_writes`.
+    ///
+    /// An active contributor overrides a false value from [`Self::add_limitation`].
+    /// Disabling a source removes only its contribution.
+    pub fn set_restricted_writes(&mut self, source: &'static str, enabled: bool) {
+        if enabled {
+            self.write_restrictions.insert(source);
+        } else {
+            self.write_restrictions.remove(source);
+        }
+    }
+
     /// Parse extension setting.
     pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
         self.extra
@@ -349,6 +364,9 @@ impl Setting {
         self.ext_limitation.iter().for_each(|(k, v)| {
             val["limitation"][k] = v.clone();
         });
+        if !self.write_restrictions.is_empty() {
+            val["limitation"]["restricted_writes"] = json!(true);
+        }
         self.ext_information.iter().for_each(|(k, v)| {
             val[k] = v.clone();
         });
@@ -458,6 +476,35 @@ mod tests {
             .contains(&Value::Number(serde_json::Number::from(1234567))));
         assert_eq!(val["payments_url"], json!("https://payments"));
         assert_eq!(val["limitation"]["payment_required"], json!(true));
+        Ok(())
+    }
+
+    #[test]
+    fn restricted_writes_preserves_other_extensions() -> Result<()> {
+        let mut setting = Setting::default();
+        let restricted = |setting: &Setting| -> Result<bool> {
+            let info: Value = serde_json::from_str(&setting.render_information()?)?;
+            Ok(info["limitation"]["restricted_writes"]
+                .as_bool()
+                .unwrap_or(false))
+        };
+        assert!(!restricted(&setting)?);
+        setting.set_restricted_writes("first", true);
+        setting.set_restricted_writes("first", true);
+        assert!(restricted(&setting)?);
+        setting.set_restricted_writes("second", true);
+        setting.set_restricted_writes("first", false);
+        setting.set_restricted_writes("first", false);
+        assert!(restricted(&setting)?);
+        setting.set_restricted_writes("second", false);
+        assert!(!restricted(&setting)?);
+        for fallback in [false, true] {
+            setting.add_limitation("restricted_writes".into(), json!(fallback));
+            setting.set_restricted_writes("first", true);
+            assert!(restricted(&setting)?);
+            setting.set_restricted_writes("first", false);
+            assert_eq!(restricted(&setting)?, fallback);
+        }
         Ok(())
     }
 
