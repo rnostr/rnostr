@@ -255,7 +255,8 @@ impl DbInner {
         mapsize: Option<usize>,
         flag: u32,
     ) -> Result<Self> {
-        // let flag = ffi::MDB_NOTLS;
+        // TLS destructors can otherwise access the reader table after it is unmapped.
+        let flag = flag | ffi::MDB_NOTLS;
 
         let path = path.as_ref();
         let c_path = to_cpath(path)?;
@@ -375,6 +376,7 @@ impl Db {
         Self::open_with(path, Some(20), Some(100), Some(1_000_000_000_000), 0)
     }
 
+    /// Always enables `MDB_NOTLS` so reader slots are released with their transactions.
     pub fn open_with<P: AsRef<Path>>(
         path: P,
         maxdbs: Option<u32>,
