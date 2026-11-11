@@ -409,7 +409,7 @@ mod tests {
         let text = r#"["REQ", "1", {}]"#;
         let mut srv = actix_test::start(|| {
             let data = create_test_app("extension").unwrap();
-            data.add_extension(Echo).web_app()
+            data.add_extension(Echo).unwrap().web_app()
         });
         let mut framed = srv.ws_at("/").await.unwrap();
         framed.send(ws::Message::Text(text.into())).await?;
@@ -431,7 +431,7 @@ mod tests {
                 let mut w = data.setting.write();
                 w.limitation.max_message_length = max_size;
             }
-            data.add_extension(Echo).web_app()
+            data.add_extension(Echo).unwrap().web_app()
         });
         let mut framed = srv.ws_at("/").await.unwrap();
         framed.send(ws::Message::Text(text.into())).await?;
@@ -460,7 +460,7 @@ mod tests {
 
         let mut srv = actix_test::start(|| {
             let data = create_test_app("extension").unwrap();
-            data.add_extension(Echo).web_app()
+            data.add_extension(Echo).unwrap().web_app()
         });
         let mut framed = srv.ws_at("/").await.unwrap();
         framed

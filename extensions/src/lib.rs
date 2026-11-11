@@ -22,6 +22,9 @@ pub mod search;
 pub use search::Search;
 
 #[cfg(test)]
+mod config_tests;
+
+#[cfg(test)]
 pub fn temp_data_path(p: &str) -> anyhow::Result<tempfile::TempDir> {
     Ok(tempfile::Builder::new()
         .prefix(&format!("nostr-relay-test-db-{}", p))

@@ -3,14 +3,14 @@ use nostr_relay::{
     db::{Db, Filter},
     duration::NonZeroDuration,
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
-    setting::SettingWrapper,
-    Error, Extension, ExtensionMessageResult, Session,
+    Error, Extension, ExtensionMessageResult, Session, Setting, SettingUpdate,
 };
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Deserialize, Default, Debug)]
+#[serde(default, deny_unknown_fields)]
 pub struct CountSetting {
     #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
@@ -48,12 +48,12 @@ impl Extension for Count {
         "count"
     }
 
-    fn setting(&mut self, setting: &SettingWrapper) {
-        let mut w = setting.write();
-        self.setting = w.parse_extension(self.name());
-        if self.setting.enabled {
-            w.add_nip(45);
+    fn setting<'a>(&'a mut self, setting: &mut Setting) -> nostr_relay::Result<SettingUpdate<'a>> {
+        let parsed: CountSetting = setting.parse_extension(self.name())?;
+        if parsed.enabled {
+            setting.add_nip(45);
         }
+        Ok(Box::new(move || self.setting = parsed))
     }
 
     fn message(
@@ -135,7 +135,7 @@ mod tests {
             )?;
         }
         let db = app.db.clone();
-        let app = app.add_extension(Count::new(db));
+        let app = app.add_extension(Count::new(db))?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));
