@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
 pub struct EventQuota {
     /// used by metrics
     #[serde(default)]
@@ -131,7 +131,7 @@ impl Quotable for EventQuota {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct RatelimiterSetting {
     pub enabled: bool,
@@ -199,7 +199,11 @@ impl Extension for Ratelimiter {
     }
 
     fn setting(&mut self, setting: &SettingWrapper) {
-        self.setting = setting.read().parse_extension(self.name());
+        let parsed = setting.read().parse_extension(self.name());
+        if parsed == self.setting {
+            return;
+        }
+        self.setting = parsed;
         self.event_limiters = self
             .setting
             .event
@@ -364,6 +368,36 @@ mod tests {
         assert!(lim.check_key(&ip).is_err());
         sleep(Duration::from_millis(1100)).await;
         assert!(lim.check_key(&ip).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn unrelated_reload_preserves_rate_limits() -> Result<()> {
+        let mut config = Setting::default();
+        config.extra.insert(
+            "rate_limiter".to_owned(),
+            serde_json::json!({
+                "enabled": true,
+                "event": [{"period": "1h", "limit": 1}]
+            }),
+        );
+        let setting: SettingWrapper = config.into();
+        let mut limiter = Ratelimiter::new();
+        limiter.setting(&setting);
+        let ip = "127.0.0.1".to_owned();
+        assert!(limiter.event_limiters[0].check_key(&ip).is_ok());
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
+
+        setting.write().information.name = "unrelated edit".to_owned();
+        limiter.setting(&setting);
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
+
+        setting.write().extra.get_mut("rate_limiter").unwrap()["event"][0]["limit"] =
+            serde_json::json!(2);
+        limiter.setting(&setting);
+        assert!(limiter.event_limiters[0].check_key(&ip).is_ok());
+        assert!(limiter.event_limiters[0].check_key(&ip).is_ok());
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
         Ok(())
     }
 
