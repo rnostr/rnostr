@@ -34,7 +34,6 @@ fn run_in_system<F: std::future::Future>(future: F) -> F::Output {
 }
 
 async fn run_relay(config: &PathBuf, watch: bool) -> Result<()> {
-    tracing_subscriber::fmt::init();
     info!("Start relay server");
 
     let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None)?;
