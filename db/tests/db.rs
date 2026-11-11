@@ -1273,6 +1273,54 @@ pub fn test_query_search() -> Result<()> {
 }
 
 #[test]
+fn sparse_scans_check_timeout_before_finding_a_match() -> Result<()> {
+    let db = create_db("sparse-scan-timeout")?;
+    let events = (0..PER_NUM)
+        .map(|i| {
+            MyEvent {
+                id: id(32, i),
+                kind: 1,
+                tags: vec![
+                    vec!["t".to_owned(), "busy".to_owned()],
+                    vec!["x".to_owned(), "busy".to_owned()],
+                ],
+                ..Default::default()
+            }
+            .into()
+        })
+        .collect::<Vec<Event>>();
+    db.batch_put(events)?;
+    let reader = db.reader()?;
+    for text in [
+        r##"{"#t": ["busy"], "kinds": [2]}"##,
+        r##"{"#t": ["busy"], "#x": ["busy"], "kinds": [2]}"##,
+        r##"{"#t": ["busy", "missing"], "kinds": [2]}"##,
+    ] {
+        for desc in [false, true] {
+            let mut filter = Filter::from_str(text)?;
+            filter.desc = desc;
+            let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+            assert_eq!(iter.stats().scan_index, 0, "{text}");
+            assert!(iter.next().is_none(), "{text}");
+            assert!(iter.stats().scan_index >= u64::from(PER_NUM), "{text}");
+
+            let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+            iter.scan_time(Duration::ZERO, 1);
+            assert!(
+                matches!(iter.next(), Some(Err(Error::ScanTimeout))),
+                "{text}"
+            );
+            assert!(iter.stats().scan_index < u64::from(PER_NUM), "{text}");
+
+            let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+            iter.scan_time(Duration::ZERO, 1);
+            assert!(matches!(iter.size(), Err(Error::ScanTimeout)), "{text}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 pub fn test_query_scan_limit_time() -> Result<()> {
     let db = create_db("test_query_scan_limit_time")?;
 
