@@ -1,7 +1,10 @@
 use crate::Error;
 use crate::{duration::NonZeroDuration, hash::NoOpHasherDefault, Result};
-use config::{Config, Environment, File, FileFormat};
-use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use config::{Config, Environment, File, FileFormat, Source};
+use notify::{
+    event::{ModifyKind, RenameMode},
+    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -15,7 +18,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub const CARGO_PKG_VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 
@@ -217,14 +220,30 @@ impl From<Setting> for SettingWrapper {
 }
 
 impl SettingWrapper {
-    /// reload setting from file
+    /// Reload settings from file, with optional environment overrides.
+    /// Files that parse to no settings are ignored and return `Ok(())`.
     pub fn reload<P: AsRef<Path>>(&self, file: P, env_prefix: Option<String>) -> Result<()> {
-        let setting = Setting::read(&file, env_prefix)?;
-        {
-            let mut w = self.write();
-            *w = setting;
+        self.reload_file(file.as_ref(), env_prefix.as_deref())
+            .map(|_| ())
+    }
+
+    fn reload_file(&self, file: &Path, env_prefix: Option<&str>) -> Result<bool> {
+        let config = Config::builder().add_source(File::from(file)).build()?;
+        // Check the file before env overrides, then apply this same cached parse.
+        if config.collect()?.is_empty() {
+            debug!(file = %file.display(), "skipping reload: no settings in file");
+            return Ok(false);
         }
-        Ok(())
+        let setting = Setting::from_config(config, env_prefix)?;
+        *self.write() = setting;
+        Ok(true)
+    }
+
+    fn reload_event(&self, event: &Event, file: &Path, env_prefix: Option<&str>) -> Result<bool> {
+        if !config_changed(event, file) {
+            return Ok(false);
+        }
+        self.reload_file(file, env_prefix)
     }
 
     /// config from file and watch file update then reload
@@ -251,28 +270,20 @@ impl SettingWrapper {
 
         let mut watcher = RecommendedWatcher::new(
             move |result: Result<Event, notify::Error>| match result {
-                Ok(event) => {
-                    #[cfg(target_os = "windows")]
-                    // There is no distinction between data writes or metadata writes. Both of these are represented by Modify(Any).
-                    let is_modify = matches!(event.kind, EventKind::Modify(ModifyKind::Any));
-                    #[cfg(not(target_os = "windows"))]
-                    let is_modify = matches!(event.kind, EventKind::Modify(ModifyKind::Data(_)));
-                    if is_modify && event.paths.contains(&c_file) {
-                        match c_setting.reload(&c_file, env_prefix.clone()) {
-                            Ok(_) => {
-                                info!("Reload config success {:?}", c_file);
-                                info!("{:?}", c_setting.read());
-                                f(&c_setting);
-                            }
-                            Err(e) => {
-                                error!(
-                                    error = e.to_string(),
-                                    "failed to reload config {:?}", c_file
-                                );
-                            }
-                        }
+                Ok(event) => match c_setting.reload_event(&event, &c_file, env_prefix.as_deref()) {
+                    Ok(true) => {
+                        info!("Reload config success {:?}", c_file);
+                        info!("{:?}", c_setting.read());
+                        f(&c_setting);
                     }
-                }
+                    Ok(false) => {}
+                    Err(e) => {
+                        error!(
+                            error = e.to_string(),
+                            "failed to reload config {:?}", c_file
+                        );
+                    }
+                },
                 Err(e) => {
                     error!(error = e.to_string(), "failed to watch file {:?}", c_file);
                 }
@@ -286,6 +297,27 @@ impl SettingWrapper {
 
         Ok(setting)
     }
+}
+
+fn config_changed(event: &Event, file: &Path) -> bool {
+    let targets_file = match event.kind {
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => false,
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
+            // On Linux, notify reports the destination in both To and Both.
+            // Ignore Both to avoid reloading twice.
+            !cfg!(target_os = "linux")
+                && event
+                    .paths
+                    .last()
+                    .is_some_and(|destination| destination == file)
+        }
+        EventKind::Create(_)
+        | EventKind::Modify(ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_)) => {
+            event.paths.iter().any(|path| path == file)
+        }
+        _ => false,
+    };
+    targets_file && file.is_file()
 }
 
 impl Setting {
@@ -357,15 +389,16 @@ impl Setting {
 
     /// read config from file and env
     pub fn read<P: AsRef<Path>>(file: P, env_prefix: Option<String>) -> Result<Self> {
-        let builder = Config::builder();
-        let mut config = builder
-            // Use serde default feature, ignore the following code
-            // // use defaults
-            // .add_source(Config::try_from(&Self::default())?)
-            // override with file contents
-            .add_source(File::with_name(file.as_ref().to_str().unwrap()));
+        let config = Config::builder()
+            .add_source(File::from(file.as_ref()))
+            .build()?;
+        Self::from_config(config, env_prefix.as_deref())
+    }
+
+    fn from_config(config: Config, env_prefix: Option<&str>) -> Result<Self> {
+        let mut config = Config::builder().add_source(config);
         if let Some(prefix) = env_prefix {
-            config = config.add_source(Self::env_source(&prefix));
+            config = config.add_source(Self::env_source(prefix));
         }
 
         let config = config.build()?;
@@ -416,7 +449,11 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use config::FileFormat;
-    use std::{fs, thread::sleep, time::Duration};
+    use notify::event::{CreateKind, DataChange};
+    use std::{
+        fs,
+        time::{Duration, Instant},
+    };
     use tempfile::Builder;
 
     #[test]
@@ -506,31 +543,158 @@ mod tests {
     }
 
     #[test]
-    fn watch() -> Result<()> {
-        let file = Builder::new()
-            .prefix("nostr-relay-config-test-watch")
-            .suffix(".toml")
-            .tempfile()?;
-
-        let setting = SettingWrapper::watch(&file, None, |_s| {})?;
-        {
-            let r = setting.read();
-            assert_eq!(r.information.name, "");
-            assert!(r.information.supported_nips.contains(&1));
+    fn config_events_match_destinations_and_existing_files() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let config = dir.path().join("relay.toml");
+        let other = dir.path().join("other.toml");
+        fs::write(&config, "")?;
+        let rename = |mode| EventKind::Modify(ModifyKind::Name(mode));
+        for (kind, paths, expected) in [
+            (
+                EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+                vec![config.clone()],
+                true,
+            ),
+            (rename(RenameMode::From), vec![config.clone()], false),
+            (rename(RenameMode::To), vec![config.clone()], true),
+            (
+                rename(RenameMode::Both),
+                vec![config.clone(), other.clone()],
+                false,
+            ),
+            (
+                rename(RenameMode::Both),
+                vec![other.clone(), config.clone()],
+                !cfg!(target_os = "linux"),
+            ),
+            (rename(RenameMode::Any), vec![config.clone()], true),
+            (EventKind::Modify(ModifyKind::Any), vec![other], false),
+            (
+                EventKind::Create(CreateKind::File),
+                vec![config.clone()],
+                true,
+            ),
+            (
+                EventKind::Create(CreateKind::Any),
+                vec![config.clone()],
+                true,
+            ),
+            (
+                EventKind::Create(CreateKind::File),
+                vec![dir.path().join("other.toml")],
+                false,
+            ),
+        ] {
+            let mut event = Event::new(kind);
+            event.paths = paths;
+            assert_eq!(config_changed(&event, &config), expected, "{event:?}");
         }
+        fs::remove_file(&config)?;
+        assert!(!config_changed(
+            &Event::new(EventKind::Modify(ModifyKind::Any)).add_path(config.clone()),
+            &config
+        ));
+        Ok(())
+    }
 
-        fs::write(
-            &file,
-            r#"[information]
-    name = "nostr"
-    "#,
+    #[test]
+    fn watcher_sequences_skip_empty_files_and_load_created_replacements() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("relay.toml");
+        let content = |name| format!("[information]\nname = '{name}'\n[network]\nport = 9001\n");
+        fs::write(&path, content("initial"))?;
+        let setting: SettingWrapper = Setting::read(&path, None)?.into();
+        let create = Event::new(EventKind::Create(CreateKind::File)).add_path(path.clone());
+        let modify =
+            Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Any))).add_path(path.clone());
+        for recreate in [false, true] {
+            let previous = setting.read().information.name.clone();
+            if recreate {
+                fs::remove_file(&path)?;
+                assert!(!setting.reload_event(&modify, &path, None)?);
+            }
+            for content in ["", " \n\t ", "# file is still being written\n"] {
+                fs::write(&path, content)?;
+                for event in [&create, &modify] {
+                    assert!(!setting.reload_event(event, &path, None)?);
+                    assert_eq!(setting.read().information.name, previous);
+                    assert_eq!(setting.read().network.port, 9001);
+                }
+            }
+            fs::write(&path, "[network]\nport = ")?;
+            assert!(setting.reload_event(&create, &path, None).is_err());
+            assert!(setting.reload_event(&modify, &path, None).is_err());
+            assert_eq!(setting.read().information.name, previous);
+            assert_eq!(setting.read().network.port, 9001);
+            fs::write(&path, content("complete"))?;
+            assert!(setting.reload_event(&create, &path, None)?);
+            assert_eq!(setting.read().information.name, "complete");
+        }
+        fs::write(&path, content("atomic"))?;
+        for (mode, expected) in [
+            (RenameMode::To, true),
+            (RenameMode::Both, !cfg!(target_os = "linux")),
+        ] {
+            let mut event = Event::new(EventKind::Modify(ModifyKind::Name(mode)));
+            if mode == RenameMode::Both {
+                event = event.add_path(dir.path().join("replacement.toml"));
+            }
+            event = event.add_path(path.clone());
+            assert_eq!(setting.reload_event(&event, &path, None)?, expected);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn reload_preserves_json_format_and_environment_overrides() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("relay.json");
+        fs::write(&path, r#"{"information":{"name":"initial"}}"#)?;
+        let setting: SettingWrapper = Setting::read(&path, None)?.into();
+        temp_env::with_vars(
+            [("RELOAD_JSON_TEST_NETWORK__PORT", Some("9003"))],
+            || -> Result<()> {
+                fs::write(&path, "{}")?;
+                let event = Event::new(EventKind::Create(notify::event::CreateKind::File))
+                    .add_path(path.clone());
+                assert!(!setting.reload_event(&event, &path, Some("RELOAD_JSON_TEST"))?);
+                assert_eq!(setting.read().information.name, "initial");
+                fs::write(
+                    &path,
+                    r#"{"information":{"name":"updated"},"network":{"port":9002}}"#,
+                )?;
+                setting.reload(&path, Some("RELOAD_JSON_TEST".into()))?;
+                assert_eq!(setting.read().information.name, "updated");
+                assert_eq!(setting.read().network.port, 9003);
+                Ok(())
+            },
         )?;
-        sleep(Duration::from_secs(1));
-        // println!("read {:?} {:?}", setting.read(), file);
-        {
-            let r = setting.read();
-            assert_eq!(r.information.name, "nostr");
-            assert!(r.information.supported_nips.contains(&1));
+        Ok(())
+    }
+
+    #[test]
+    fn watch() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("relay.toml");
+        let content = |name: &str| format!("[information]\nname = '{name}'\n");
+        fs::write(&path, content("initial"))?;
+        let (changed, changes) = std::sync::mpsc::channel();
+        let setting = SettingWrapper::watch(&path, None, move |setting| {
+            let _ = changed.send(setting.read().information.name.clone());
+        })?;
+        for (name, atomic) in [("inplace", false), ("atomic", true)] {
+            if atomic {
+                let replacement = dir.path().join("replacement.toml");
+                fs::write(&replacement, content(name))?;
+                fs::rename(replacement, &path)?;
+            } else {
+                fs::write(&path, content(name))?;
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while changes.recv_timeout(deadline.saturating_duration_since(Instant::now()))? != name
+            {
+            }
+            assert_eq!(setting.read().information.name, name);
         }
         Ok(())
     }
