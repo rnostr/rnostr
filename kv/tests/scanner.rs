@@ -4,8 +4,12 @@ use nostr_kv::{
     scanner::*,
     Error,
 };
-use std::ops::Bound;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    cell::Cell,
+    ops::Bound,
+    rc::Rc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Debug)]
 struct Key<'txn> {
@@ -202,5 +206,81 @@ pub fn test_scanner() -> Result<()> {
     let res = group.try_for_each(|k| k.map(|_k| ()));
     assert!(matches!(res, Err(MyError::LongQuery)));
 
+    Ok(())
+}
+
+#[test]
+fn group_errors_are_terminal() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let db = Db::open(dir.path())?;
+    let tree = db.open_tree(Some("terminal-errors"), 0)?;
+    let mut writer = db.writer()?;
+    for kind in 1..=2 {
+        for time in 1u64..=3 {
+            writer.put(&tree, Key::encode(kind, time), time.to_be_bytes())?;
+        }
+    }
+    writer.commit()?;
+    let reader = db.reader()?;
+    for (and, dup, scanners) in [
+        (false, false, 1),
+        (false, false, 2),
+        (false, true, 2),
+        (true, false, 2),
+    ] {
+        for read_error in [false, true] {
+            for fail_at in 1..=3 {
+                let calls = Rc::new(Cell::new(0));
+                let check = move || {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == fail_at {
+                        Err(MyError::LongQuery)
+                    } else {
+                        Ok(())
+                    }
+                };
+                let watch_check = check.clone();
+                let mut group = Group::new(false, and, dup);
+                group.watcher(Box::new(
+                    move |_| {
+                        if read_error {
+                            Ok(())
+                        } else {
+                            watch_check()
+                        }
+                    },
+                ));
+                for kind in 1u64..=scanners {
+                    let prefix = kind.to_be_bytes().to_vec();
+                    let iter = reader.iter_from(&tree, Bound::Included(&prefix), false);
+                    let read_check = check.clone();
+                    group.add(Box::new(Scanner::new(
+                        iter,
+                        prefix.clone(),
+                        prefix,
+                        false,
+                        None,
+                        None,
+                        Box::new(move |scanner, (key, value)| {
+                            if read_error {
+                                read_check()?;
+                            }
+                            Ok(if key.starts_with(&scanner.prefix) {
+                                MatchResult::Found(Key::from(key, value))
+                            } else {
+                                MatchResult::Stop
+                            })
+                        }),
+                    )))?;
+                }
+                assert!(matches!(
+                    group.by_ref().find(|item| item.is_err()),
+                    Some(Err(MyError::LongQuery))
+                ));
+                assert!(group.next().is_none());
+                assert!(group.flatten().next().is_none());
+            }
+        }
+    }
     Ok(())
 }
