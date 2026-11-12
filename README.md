@@ -95,6 +95,11 @@ cargo build --release
 
 ```
 
+With `--watch`, the config is reloaded once the file has been unchanged for 250 ms;
+a file with no settings is skipped. To update it safely, write the new config to a
+temporary file in the same directory and rename it over the watched file: a writer
+that pauses mid-file for longer than that can get a partial config applied.
+
 Japanese and Korean search tokenization are enabled by default. Their dictionaries
 are downloaded by Lindera build scripts during compilation. To build without
 these downloads, while keeping search and the other relay extensions enabled:
