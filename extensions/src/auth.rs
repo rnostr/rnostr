@@ -20,6 +20,17 @@ pub struct Permission {
     pub allow_mentioning_whitelisted_pubkeys: bool,
 }
 
+impl Permission {
+    fn restricts_writes(&self) -> bool {
+        self.ip_whitelist.is_some()
+            || self.pubkey_whitelist.is_some()
+            || self.event_pubkey_whitelist.is_some()
+            // Unlike IP or event-author blacklists, this requires login before every write,
+            // even when empty, so we advertise the publishing prerequisite.
+            || self.pubkey_blacklist.is_some()
+    }
+}
+
 #[derive(Deserialize, Default, Debug)]
 #[serde(default)]
 pub struct AuthSetting {
@@ -143,6 +154,13 @@ impl Extension for Auth {
         if self.setting.enabled {
             w.add_nip(42);
         }
+        let restricted_writes = self.setting.enabled
+            && self
+                .setting
+                .event
+                .as_ref()
+                .is_some_and(Permission::restricts_writes);
+        w.set_restricted_writes(self.name(), restricted_writes);
     }
 
     fn connected(&self, session: &mut Session, ctx: &mut <Session as actix::Actor>::Context) {
@@ -256,7 +274,10 @@ impl Extension for Auth {
 mod tests {
     use super::*;
     use crate::create_test_app;
-    use actix_web::web;
+    use actix_web::{
+        test::{call_and_read_body_json, init_service, TestRequest},
+        web,
+    };
     use actix_web_actors::ws;
     use anyhow::Result;
     use futures_util::{SinkExt as _, StreamExt as _};
@@ -265,6 +286,7 @@ mod tests {
         secp256k1::{rand::thread_rng, Keypair, XOnlyPublicKey},
         Event,
     };
+    use serde_json::{json, Value};
 
     fn parse_text<T: serde::de::DeserializeOwned>(frame: &ws::Frame) -> Result<T> {
         if let ws::Frame::Text(text) = &frame {
@@ -273,6 +295,98 @@ mod tests {
         } else {
             Err(nostr_relay::Error::Message("invalid frame type".to_string()).into())
         }
+    }
+
+    #[actix_rt::test]
+    async fn nip11_reports_write_restrictions() -> Result<()> {
+        let app = web::Data::new(create_test_app("auth_nip11")?.add_extension(Auth::new()));
+        let service = init_service(create_web_app(app.clone())).await;
+        let mut cases = vec![
+            (json!({}), false),
+            (json!({"enabled": true}), false),
+            (json!({"enabled": true, "event": {}}), false),
+        ];
+        for (field, restricted) in [
+            ("ip_whitelist", true),
+            ("pubkey_whitelist", true),
+            ("event_pubkey_whitelist", true),
+            ("ip_blacklist", false),
+            ("pubkey_blacklist", true),
+            ("event_pubkey_blacklist", false),
+        ] {
+            for values in [json!([]), json!(["allowed"])] {
+                cases.extend([
+                    (
+                        json!({"enabled": true, "event": {field: values}}),
+                        restricted,
+                    ),
+                    (json!({"enabled": false, "event": {field: values}}), false),
+                    (json!({"enabled": true, "req": {field: values}}), false),
+                ]);
+            }
+        }
+        for (config, restricted) in cases {
+            app.setting
+                .write()
+                .extra
+                .insert("auth".into(), config.clone());
+            app.extensions.write().call_setting(&app.setting);
+            let request = TestRequest::get()
+                .uri("/")
+                .insert_header(("Accept", "application/nostr+json"))
+                .to_request();
+            let info: Value = call_and_read_body_json(&service, request).await;
+            assert_eq!(
+                info["limitation"]["restricted_writes"]
+                    .as_bool()
+                    .unwrap_or(false),
+                restricted,
+                "auth config: {config}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn nip11_preserves_other_write_restrictions() -> Result<()> {
+        let setting: SettingWrapper = nostr_relay::Setting::default().into();
+        let mut auth = Auth::new();
+        setting.write().set_restricted_writes("other", true);
+        for enabled in [true, false] {
+            setting.write().extra.insert(
+                "auth".into(),
+                json!({"enabled": enabled, "event": {"ip_whitelist": ["127.0.0.1"]}}),
+            );
+            auth.setting(&setting);
+            let info: Value = serde_json::from_str(&setting.read().render_information()?)?;
+            assert_eq!(info["limitation"]["restricted_writes"], json!(true));
+        }
+        setting.write().set_restricted_writes("other", false);
+        let info: Value = serde_json::from_str(&setting.read().render_information()?)?;
+        assert!(info["limitation"]["restricted_writes"].is_null());
+        Ok(())
+    }
+
+    #[test]
+    fn empty_pubkey_blacklist_requires_authentication() {
+        let permission = Permission {
+            pubkey_blacklist: Some(List::default()),
+            ..Default::default()
+        };
+        let pubkey = "writer".to_owned();
+        let ip = "127.0.0.1".to_owned();
+        assert_eq!(
+            Auth::verify_permission(Some(&permission), None, Some(&pubkey), None, &ip),
+            Err("NIP-42 auth required")
+        );
+        assert!(Auth::verify_permission(
+            Some(&permission),
+            Some(&pubkey),
+            Some(&pubkey),
+            None,
+            &ip,
+        )
+        .is_ok());
     }
 
     #[test]
