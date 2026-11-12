@@ -17,6 +17,7 @@ pub struct Permission {
     pub pubkey_blacklist: Option<List>,
     pub event_pubkey_whitelist: Option<List>,
     pub event_pubkey_blacklist: Option<List>,
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub allow_mentioning_whitelisted_pubkeys: bool,
 }
 
@@ -34,6 +35,7 @@ impl Permission {
 #[derive(Deserialize, Default, Debug)]
 #[serde(default)]
 pub struct AuthSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
     /// read auth: ["REQ"]
     pub req: Option<Permission>,

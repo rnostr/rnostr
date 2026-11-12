@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct MetricsSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
     pub auth: Option<String>,
 }
@@ -109,6 +110,26 @@ pub mod tests {
     };
     use anyhow::Result;
     use std::time::Duration;
+
+    #[test]
+    fn environment_credentials_keep_their_text() -> Result<()> {
+        for auth in ["123456", "00123456", "true", "1.0"] {
+            temp_env::with_vars(
+                [
+                    ("METRICS_ENV_METRICS__AUTH", Some(auth)),
+                    ("METRICS_ENV_METRICS__ENABLED", Some("true")),
+                ],
+                || -> Result<()> {
+                    let setting = nostr_relay::Setting::from_env("METRICS_ENV".to_owned())?;
+                    let metrics: super::MetricsSetting = setting.parse_extension("metrics");
+                    assert!(metrics.enabled);
+                    assert_eq!(metrics.auth.as_deref(), Some(auth));
+                    Ok(())
+                },
+            )?;
+        }
+        Ok(())
+    }
 
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
