@@ -115,8 +115,8 @@ pub fn event_identifier(tags: &[Vec<String>]) -> &str {
         .unwrap_or_default()
 }
 
-// Replaceable Events [NIP-16](https://nips.be/16)
-// Parameterized Replaceable Events [NIP-33](https://nips.be/33)
+// Replaceable Events [NIP-16](https://github.com/nostr-protocol/nips/blob/master/16.md)
+// Parameterized Replaceable Events [NIP-33](https://github.com/nostr-protocol/nips/blob/master/33.md)
 pub fn encode_replace_key(kind: u16, pubkey: &[u8; 32], tags: &[Vec<String>]) -> Option<Vec<u8>> {
     if kind == 0 || kind == 3 || kind == 41 || (10_000..20_000).contains(&kind) {
         let k = u16_to_ver(kind);

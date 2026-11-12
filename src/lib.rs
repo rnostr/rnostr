@@ -56,7 +56,7 @@ pub struct ExportOpts {
     #[arg(value_name = "PATH")]
     pub path: PathBuf,
 
-    /// [NIP-01](https://nips.be/1) Filter
+    /// [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) Filter
     #[arg(short = 'f', long, value_name = "FILTER", default_value = "{}")]
     pub filter: Filter,
 
@@ -76,7 +76,7 @@ pub struct DeleteOpts {
     #[arg(value_name = "PATH")]
     pub path: PathBuf,
 
-    /// [NIP-01](https://nips.be/1) Filter
+    /// [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) Filter
     #[arg(short = 'f', long, value_name = "FILTER", default_value = "{}")]
     pub filter: Filter,
 

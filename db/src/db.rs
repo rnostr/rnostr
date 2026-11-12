@@ -433,7 +433,7 @@ impl Db {
             return Ok(CheckEventResult::Deleted);
         }
 
-        // [NIP-09](https://nips.be/9)
+        // [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md)
         // delete event
         if event.kind() == 5 {
             for tag in event.index().tags() {
