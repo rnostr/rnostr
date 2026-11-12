@@ -46,7 +46,7 @@ Provide metrics url for [prometheus](https://prometheus.io/) scrape
 
 #### Auth
 
-[NIP-42](https://nips.be/42) Authentication, ip, auth pubkey and event pubkey whitelist blacklist
+[NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) Authentication, ip, auth pubkey and event pubkey whitelist blacklist
 
 #### Rate limiter
 
@@ -54,12 +54,12 @@ Limit event write frequency.
 
 #### Count
 
-[NIP-45](https://nips.be/45) count results.
+[NIP-45](https://github.com/nostr-protocol/nips/blob/master/45.md) count results.
 When the query results are too large (millions) will trigger a slow query. `setting.data.db_query_timeout`.
 
 #### Search
 
-[NIP-50](https://nips.be/50) Keywords filter. [nostr-db](./db/) implement a simple exact match pattern, case-insensitive, time-sorted full-text search. No performance optimization for multi-word queries, so it's experimental.
+[NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) Keywords filter. [nostr-db](./db/) implement a simple exact match pattern, case-insensitive, time-sorted full-text search. No performance optimization for multi-word queries, so it's experimental.
 
 It reduces write concurrency and makes space usage significantly larger. So it is suitable for use in private or paid relay.
 
