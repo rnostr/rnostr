@@ -32,6 +32,7 @@ pub struct EventQuota {
     #[serde(default)]
     pub description: String,
     pub period: NonZeroDuration,
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub limit: NonZeroU32,
     /// only limit for kinds
     /// support kind list: [1, 2, 3]
@@ -134,6 +135,7 @@ impl Quotable for EventQuota {
 #[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct RatelimiterSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
     /// write event rate limiter: ["EVENT"]
     pub event: Vec<EventQuota>,
@@ -335,6 +337,27 @@ mod tests {
         )?;
         assert!(!q.hit(&event, &"127".to_owned()));
         Ok(())
+    }
+
+    #[test]
+    fn environment_overrides_typed_file_values() -> Result<()> {
+        let file = tempfile::Builder::new().suffix(".toml").tempfile()?;
+        std::fs::write(
+            file.path(),
+            "[rate_limiter]\nclear_interval = 30\n[[rate_limiter.event]]\nperiod = 1\nlimit = 3\nkinds = [1, [10, 20]]\n",
+        )?;
+        temp_env::with_var("RATE_ENV_RATE_LIMITER__ENABLED", Some("TRUE"), || {
+            let setting = Setting::read(file.path(), Some("RATE_ENV".to_owned()))?;
+            let parsed: RatelimiterSetting = setting.parse_extension("rate_limiter");
+            assert!(parsed.enabled);
+            assert_eq!(*parsed.clear_interval, Duration::from_secs(30));
+            assert_eq!(parsed.event[0].limit.get(), 3);
+            assert_eq!(
+                parsed.event[0].kinds,
+                Some(vec![Range(1, 2), Range(10, 20)])
+            );
+            Ok(())
+        })
     }
 
     #[actix_rt::test]

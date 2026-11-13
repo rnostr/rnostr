@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct SearchSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
 }
 

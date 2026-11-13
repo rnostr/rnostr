@@ -28,6 +28,23 @@ fn default_version() -> String {
     CARGO_PKG_VERSION.map(ToOwned::to_owned).unwrap_or_default()
 }
 
+/// Deserialize a boolean or numeric extension field from its own type or from
+/// text, which is how environment overrides arrive.
+pub fn deserialize_scalar<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: DeserializeOwned + std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    match Value::deserialize(deserializer)? {
+        Value::String(text) => text
+            .parse()
+            .or_else(|err| text.to_ascii_lowercase().parse().map_err(|_| err))
+            .map_err(|err| serde::de::Error::custom(format!("{text:?}: {err}"))),
+        value => T::deserialize(value).map_err(serde::de::Error::custom),
+    }
+}
+
 fn default_nips() -> Vec<u32> {
     vec![1, 2, 4, 9, 11, 12, 15, 16, 20, 22, 25, 26, 28, 33, 40, 70]
 }
@@ -377,7 +394,7 @@ impl Setting {
         self.extra
             .get(key)
             .and_then(|v| {
-                let r = serde_json::from_value::<T>(v.clone());
+                let r = T::deserialize(v);
                 if let Err(err) = &r {
                     error!(error = err.to_string(), "failed to parse {:?} setting", key);
                 }
@@ -445,7 +462,7 @@ impl Setting {
 
     fn env_source(prefix: &str) -> Environment {
         Environment::with_prefix(prefix)
-            .try_parsing(true)
+            .try_parsing(false)
             .prefix_separator("_")
             .separator("__")
         // .list_separator(" ")
@@ -492,6 +509,60 @@ mod tests {
         time::{Duration, Instant},
     };
     use tempfile::Builder;
+
+    #[test]
+    fn environment_values_keep_their_text_until_typed() -> Result<()> {
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct Policy {
+            #[serde(deserialize_with = "deserialize_scalar")]
+            enabled: bool,
+            #[serde(deserialize_with = "deserialize_scalar")]
+            limit: usize,
+            #[serde(deserialize_with = "deserialize_scalar")]
+            ratio: f64,
+            timeout: Option<NonZeroDuration>,
+            token: Option<String>,
+            flag: String,
+        }
+        temp_env::with_vars(
+            [
+                ("ENV_TEXT_INFORMATION__NAME", Some("00123")),
+                ("ENV_TEXT_INFORMATION__DESCRIPTION", Some("true")),
+                ("ENV_TEXT_NETWORK__PORT", Some("9001")),
+                ("ENV_TEXT_NETWORK__HEARTBEAT_INTERVAL", Some("30")),
+                ("ENV_TEXT_POLICY__ENABLED", Some("TRUE")),
+                ("ENV_TEXT_POLICY__LIMIT", Some("0003")),
+                ("ENV_TEXT_POLICY__RATIO", Some("0.5")),
+                ("ENV_TEXT_POLICY__TIMEOUT", Some("5")),
+                ("ENV_TEXT_POLICY__TOKEN", Some("00123456")),
+                ("ENV_TEXT_POLICY__FLAG", Some("1.0")),
+            ],
+            || -> Result<()> {
+                let setting = Setting::from_env("ENV_TEXT".to_owned())?;
+                assert_eq!(setting.information.name, "00123");
+                assert_eq!(setting.information.description, "true");
+                assert_eq!(setting.network.port, 9001);
+                assert_eq!(
+                    Duration::from(setting.network.heartbeat_interval),
+                    Duration::from_secs(30)
+                );
+                let policy: Policy = setting.parse_extension("policy");
+                assert!(policy.enabled);
+                assert_eq!(policy.limit, 3);
+                assert_eq!(policy.ratio, 0.5);
+                assert_eq!(
+                    policy.timeout.map(Duration::from),
+                    Some(Duration::from_secs(5))
+                );
+                assert_eq!(policy.token.as_deref(), Some("00123456"));
+                assert_eq!(policy.flag, "1.0");
+                let error = serde_json::from_value::<Policy>(json!({"enabled": "yes"}));
+                assert!(error.err().unwrap().to_string().starts_with("\"yes\": "));
+                Ok(())
+            },
+        )
+    }
 
     #[test]
     fn der() -> Result<()> {

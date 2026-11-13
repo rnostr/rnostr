@@ -12,6 +12,7 @@ use std::time::Instant;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct CountSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
 }
 
