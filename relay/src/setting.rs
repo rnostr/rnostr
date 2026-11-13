@@ -1,10 +1,7 @@
 use crate::Error;
 use crate::{duration::NonZeroDuration, hash::NoOpHasherDefault, Result};
 use config::{Config, Environment, File, FileFormat, Source};
-use notify::{
-    event::{ModifyKind, RenameMode},
-    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
-};
+use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -14,13 +11,18 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     ops::Deref,
+    panic::{self, AssertUnwindSafe},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{mpsc, Arc},
+    thread,
     time::Duration,
 };
-use tracing::{debug, error, info};
+use tracing::{error, info, warn};
 
 pub const CARGO_PKG_VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
+/// Quiet period after the last change before a watched config file is reloaded,
+/// so a file that is still being written is not applied half-finished.
+const CONFIG_RELOAD_DELAY: Duration = Duration::from_millis(250);
 
 fn default_version() -> String {
     CARGO_PKG_VERSION.map(ToOwned::to_owned).unwrap_or_default()
@@ -224,17 +226,18 @@ impl From<Setting> for SettingWrapper {
 
 impl SettingWrapper {
     /// Reload settings from file, with optional environment overrides.
-    /// Files that parse to no settings are ignored and return `Ok(())`.
     pub fn reload<P: AsRef<Path>>(&self, file: P, env_prefix: Option<String>) -> Result<()> {
-        self.reload_file(file.as_ref(), env_prefix.as_deref())
-            .map(|_| ())
+        *self.write() = Setting::read(file, env_prefix)?;
+        Ok(())
     }
 
-    fn reload_file(&self, file: &Path, env_prefix: Option<&str>) -> Result<bool> {
+    /// Reload after a watched change. A file with no settings is most likely
+    /// truncated and about to be rewritten, so it is skipped.
+    fn reload_watched(&self, file: &Path, env_prefix: Option<&str>) -> Result<bool> {
         let config = Config::builder().add_source(File::from(file)).build()?;
         // Check the file before env overrides, then apply this same cached parse.
         if config.collect()?.is_empty() {
-            debug!(file = %file.display(), "skipping reload: no settings in file");
+            warn!(file = %file.display(), "skipping reload: no settings in file");
             return Ok(false);
         }
         let setting = Setting::from_config(config, env_prefix)?;
@@ -242,14 +245,10 @@ impl SettingWrapper {
         Ok(true)
     }
 
-    fn reload_event(&self, event: &Event, file: &Path, env_prefix: Option<&str>) -> Result<bool> {
-        if !config_changed(event, file) {
-            return Ok(false);
-        }
-        self.reload_file(file, env_prefix)
-    }
-
     /// config from file and watch file update then reload
+    ///
+    /// Reloads wait until the file has been unchanged for 250 ms and skip
+    /// files with no settings.
     pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
         file: P,
         env_prefix: Option<String>,
@@ -271,22 +270,20 @@ impl SettingWrapper {
             .parent()
             .ok_or_else(|| Error::Message("failed to get config dir".to_owned()))?;
 
+        let (changed, changes) = mpsc::sync_channel(1);
         let mut watcher = RecommendedWatcher::new(
             move |result: Result<Event, notify::Error>| match result {
-                Ok(event) => match c_setting.reload_event(&event, &c_file, env_prefix.as_deref()) {
-                    Ok(true) => {
-                        info!("Reload config success {:?}", c_file);
-                        info!("{:?}", c_setting.read());
-                        f(&c_setting);
+                Ok(event) => {
+                    // A full channel already has a reload pending.
+                    if config_changed(&event, &c_file)
+                        && matches!(
+                            changed.try_send(()),
+                            Err(mpsc::TrySendError::Disconnected(()))
+                        )
+                    {
+                        error!("config reload stopped, ignoring change of {:?}", c_file);
                     }
-                    Ok(false) => {}
-                    Err(e) => {
-                        error!(
-                            error = e.to_string(),
-                            "failed to reload config {:?}", c_file
-                        );
-                    }
-                },
+                }
                 Err(e) => {
                     error!(error = e.to_string(), "failed to watch file {:?}", c_file);
                 }
@@ -295,6 +292,37 @@ impl SettingWrapper {
         )?;
 
         watcher.watch(dir, RecursiveMode::NonRecursive)?;
+        // Exits when the watcher, which owns the sender, is dropped.
+        thread::Builder::new()
+            .name("config-reload".to_owned())
+            .spawn(move || {
+                while changes.recv().is_ok() {
+                    loop {
+                        match changes.recv_timeout(CONFIG_RELOAD_DELAY) {
+                            Ok(()) => continue,
+                            Err(mpsc::RecvTimeoutError::Timeout) => break,
+                            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                    // A panic must not end this thread, or later changes are lost.
+                    let reload = panic::catch_unwind(AssertUnwindSafe(|| {
+                        match c_setting.reload_watched(&file, env_prefix.as_deref()) {
+                            Ok(true) => {
+                                info!("Reload config success {:?}", file);
+                                info!("{:?}", c_setting.read());
+                                f(&c_setting);
+                            }
+                            Ok(false) => {}
+                            Err(e) => {
+                                error!(error = e.to_string(), "failed to reload config {:?}", file);
+                            }
+                        }
+                    }));
+                    if reload.is_err() {
+                        error!("panic while reloading config {:?}", file);
+                    }
+                }
+            })?;
         // save watcher
         setting.watcher = Some(Arc::new(watcher));
 
@@ -302,25 +330,15 @@ impl SettingWrapper {
     }
 }
 
+/// Whether an event may have changed the config file. Several events for one
+/// change are fine: the reload delay merges them.
 fn config_changed(event: &Event, file: &Path) -> bool {
-    let targets_file = match event.kind {
-        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => false,
-        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
-            // On Linux, notify reports the destination in both To and Both.
-            // Ignore Both to avoid reloading twice.
-            !cfg!(target_os = "linux")
-                && event
-                    .paths
-                    .last()
-                    .is_some_and(|destination| destination == file)
-        }
+    matches!(
+        event.kind,
         EventKind::Create(_)
-        | EventKind::Modify(ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_)) => {
-            event.paths.iter().any(|path| path == file)
-        }
-        _ => false,
-    };
-    targets_file && file.is_file()
+            | EventKind::Modify(ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_))
+    ) && event.paths.iter().any(|path| path == file)
+        && file.is_file()
 }
 
 impl Setting {
@@ -467,9 +485,10 @@ mod tests {
     use super::*;
     use anyhow::Result;
     use config::FileFormat;
-    use notify::event::{CreateKind, DataChange};
+    use notify::event::{CreateKind, DataChange, RenameMode};
     use std::{
         fs,
+        io::Write,
         time::{Duration, Instant},
     };
     use tempfile::Builder;
@@ -602,17 +621,18 @@ mod tests {
                 vec![config.clone()],
                 true,
             ),
-            (rename(RenameMode::From), vec![config.clone()], false),
-            (rename(RenameMode::To), vec![config.clone()], true),
+            // A renamed-away path counts while the file exists: it was replaced.
+            (rename(RenameMode::From), vec![config.clone()], true),
             (
                 rename(RenameMode::Both),
                 vec![config.clone(), other.clone()],
-                false,
+                true,
             ),
+            (rename(RenameMode::To), vec![config.clone()], true),
             (
                 rename(RenameMode::Both),
                 vec![other.clone(), config.clone()],
-                !cfg!(target_os = "linux"),
+                true,
             ),
             (rename(RenameMode::Any), vec![config.clone()], true),
             (EventKind::Modify(ModifyKind::Any), vec![other], false),
@@ -644,6 +664,15 @@ mod tests {
         Ok(())
     }
 
+    fn reload_event(
+        setting: &SettingWrapper,
+        event: &Event,
+        file: &Path,
+        env_prefix: Option<&str>,
+    ) -> Result<bool> {
+        Ok(config_changed(event, file) && setting.reload_watched(file, env_prefix)?)
+    }
+
     #[test]
     fn watcher_sequences_skip_empty_files_and_load_created_replacements() -> Result<()> {
         let dir = tempfile::tempdir()?;
@@ -658,36 +687,33 @@ mod tests {
             let previous = setting.read().information.name.clone();
             if recreate {
                 fs::remove_file(&path)?;
-                assert!(!setting.reload_event(&modify, &path, None)?);
+                assert!(!reload_event(&setting, &modify, &path, None)?);
             }
             for content in ["", " \n\t ", "# file is still being written\n"] {
                 fs::write(&path, content)?;
                 for event in [&create, &modify] {
-                    assert!(!setting.reload_event(event, &path, None)?);
+                    assert!(!reload_event(&setting, event, &path, None)?);
                     assert_eq!(setting.read().information.name, previous);
                     assert_eq!(setting.read().network.port, 9001);
                 }
             }
             fs::write(&path, "[network]\nport = ")?;
-            assert!(setting.reload_event(&create, &path, None).is_err());
-            assert!(setting.reload_event(&modify, &path, None).is_err());
+            assert!(reload_event(&setting, &create, &path, None).is_err());
+            assert!(reload_event(&setting, &modify, &path, None).is_err());
             assert_eq!(setting.read().information.name, previous);
             assert_eq!(setting.read().network.port, 9001);
             fs::write(&path, content("complete"))?;
-            assert!(setting.reload_event(&create, &path, None)?);
+            assert!(reload_event(&setting, &create, &path, None)?);
             assert_eq!(setting.read().information.name, "complete");
         }
         fs::write(&path, content("atomic"))?;
-        for (mode, expected) in [
-            (RenameMode::To, true),
-            (RenameMode::Both, !cfg!(target_os = "linux")),
-        ] {
+        for mode in [RenameMode::To, RenameMode::Both] {
             let mut event = Event::new(EventKind::Modify(ModifyKind::Name(mode)));
             if mode == RenameMode::Both {
                 event = event.add_path(dir.path().join("replacement.toml"));
             }
             event = event.add_path(path.clone());
-            assert_eq!(setting.reload_event(&event, &path, None)?, expected);
+            assert!(reload_event(&setting, &event, &path, None)?);
         }
         Ok(())
     }
@@ -704,7 +730,12 @@ mod tests {
                 fs::write(&path, "{}")?;
                 let event = Event::new(EventKind::Create(notify::event::CreateKind::File))
                     .add_path(path.clone());
-                assert!(!setting.reload_event(&event, &path, Some("RELOAD_JSON_TEST"))?);
+                assert!(!reload_event(
+                    &setting,
+                    &event,
+                    &path,
+                    Some("RELOAD_JSON_TEST")
+                )?);
                 assert_eq!(setting.read().information.name, "initial");
                 fs::write(
                     &path,
@@ -713,6 +744,10 @@ mod tests {
                 setting.reload(&path, Some("RELOAD_JSON_TEST".into()))?;
                 assert_eq!(setting.read().information.name, "updated");
                 assert_eq!(setting.read().network.port, 9003);
+                // Unlike the watcher, an explicit reload applies an empty file.
+                fs::write(&path, "{}")?;
+                setting.reload(&path, Some("RELOAD_JSON_TEST".into()))?;
+                assert_eq!(setting.read().information, Information::default());
                 Ok(())
             },
         )?;
@@ -742,6 +777,49 @@ mod tests {
             {
             }
             assert_eq!(setting.read().information.name, name);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn watch_waits_for_slow_writes_to_finish() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("relay.toml");
+        fs::write(&path, "[information]\nname = 'initial'\n")?;
+        let (changed, changes) = std::sync::mpsc::channel();
+        let setting = SettingWrapper::watch(&path, None, move |setting| {
+            let setting = setting.read();
+            let _ = changed.send((setting.information.name.clone(), setting.network.port));
+        })?;
+        // The first chunk alone is a valid configuration.
+        let mut writer = fs::File::create(&path)?;
+        writer.write_all(b"[information]\nname = 'slow'\n")?;
+        assert!(changes.recv_timeout(CONFIG_RELOAD_DELAY / 5).is_err());
+        writer.write_all(b"[network]\nport = 9001\n")?;
+        drop(writer);
+        assert_eq!(
+            changes.recv_timeout(Duration::from_secs(5))?,
+            ("slow".to_owned(), 9001)
+        );
+        assert_eq!(setting.read().network.port, 9001);
+        Ok(())
+    }
+
+    #[test]
+    fn watch_survives_a_panicking_callback() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("relay.toml");
+        let content = |name: &str| format!("[information]\nname = '{name}'\n");
+        fs::write(&path, content("initial"))?;
+        let (changed, changes) = std::sync::mpsc::channel();
+        let _setting = SettingWrapper::watch(&path, None, move |setting| {
+            let name = setting.read().information.name.clone();
+            let _ = changed.send(name.clone());
+            assert_ne!(name, "panic");
+        })?;
+        for name in ["panic", "recovered"] {
+            fs::write(&path, content(name))?;
+            assert_eq!(changes.recv_timeout(Duration::from_secs(5))?, name);
         }
         Ok(())
     }
