@@ -15,14 +15,14 @@ async fn main() -> nostr_relay::Result<()> {
 
     #[cfg(feature = "metrics")]
     {
-        app_data = app_data.add_extension(nostr_extensions::Metrics::new());
+        app_data = app_data.add_extension(nostr_extensions::Metrics::new())?;
     }
 
-    app_data = app_data.add_extension(nostr_extensions::Auth::new());
+    app_data = app_data.add_extension(nostr_extensions::Auth::new())?;
 
     #[cfg(feature = "rate_limiter")]
     {
-        app_data = app_data.add_extension(nostr_extensions::Ratelimiter::new());
+        app_data = app_data.add_extension(nostr_extensions::Ratelimiter::new())?;
     }
 
     app_data.web_server()?.await?;

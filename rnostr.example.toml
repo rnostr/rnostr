@@ -1,5 +1,6 @@
 # Configuration
 # All duration format reference https://docs.rs/duration-str/latest/duration_str/
+# Invalid settings prevent startup; invalid reloads keep the previous configuration.
 #
 # config relay information
 [information]
@@ -107,7 +108,7 @@ enabled = false
 enabled = false
 
 # # interval at second for clearing invalid data to free up memory.
-# # 0 will be converted to default 60 seconds
+# # Must be positive; default 60 seconds.
 # clear_interval = "60s"
 
 # # rate limiter ruler list when write event per user client IP

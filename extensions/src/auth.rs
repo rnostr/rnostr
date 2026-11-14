@@ -2,14 +2,13 @@ use metrics::{counter, describe_counter};
 use nostr_relay::db::now;
 use nostr_relay::{
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
-    setting::SettingWrapper,
-    Extension, ExtensionMessageResult, List, Session,
+    Extension, ExtensionMessageResult, List, Result, Session, Setting, SettingUpdate,
 };
 use serde::Deserialize;
 use uuid::Uuid;
 
 #[derive(Deserialize, Default, Debug)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Permission {
     pub ip_whitelist: Option<List>,
     pub pubkey_whitelist: Option<List>,
@@ -33,13 +32,15 @@ impl Permission {
 }
 
 #[derive(Deserialize, Default, Debug)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AuthSetting {
     #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
     /// read auth: ["REQ"]
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_table")]
     pub req: Option<Permission>,
     /// write auth: ["EVENT"]
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_table")]
     pub event: Option<Permission>,
 }
 
@@ -150,19 +151,18 @@ impl Extension for Auth {
         "auth"
     }
 
-    fn setting(&mut self, setting: &SettingWrapper) {
-        let mut w = setting.write();
-        self.setting = w.parse_extension(self.name());
-        if self.setting.enabled {
-            w.add_nip(42);
+    fn setting<'a>(&'a mut self, setting: &mut Setting) -> Result<SettingUpdate<'a>> {
+        let parsed: AuthSetting = setting.parse_extension(self.name())?;
+        if parsed.enabled {
+            setting.add_nip(42);
         }
-        let restricted_writes = self.setting.enabled
-            && self
-                .setting
+        let restricted_writes = parsed.enabled
+            && parsed
                 .event
                 .as_ref()
                 .is_some_and(Permission::restricts_writes);
-        w.set_restricted_writes(self.name(), restricted_writes);
+        setting.set_restricted_writes(self.name(), restricted_writes);
+        Ok(Box::new(move || self.setting = parsed))
     }
 
     fn connected(&self, session: &mut Session, ctx: &mut <Session as actix::Actor>::Context) {
@@ -283,11 +283,11 @@ mod tests {
     use actix_web_actors::ws;
     use anyhow::Result;
     use futures_util::{SinkExt as _, StreamExt as _};
-    use nostr_relay::create_web_app;
     use nostr_relay::db::{
         secp256k1::{rand::thread_rng, Keypair, XOnlyPublicKey},
         Event,
     };
+    use nostr_relay::{create_web_app, setting::SettingWrapper};
     use serde_json::{json, Value};
 
     fn parse_text<T: serde::de::DeserializeOwned>(frame: &ws::Frame) -> Result<T> {
@@ -301,7 +301,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn nip11_reports_write_restrictions() -> Result<()> {
-        let app = web::Data::new(create_test_app("auth_nip11")?.add_extension(Auth::new()));
+        let app = web::Data::new(create_test_app("auth_nip11")?.add_extension(Auth::new())?);
         let service = init_service(create_web_app(app.clone())).await;
         let mut cases = vec![
             (json!({}), false),
@@ -328,11 +328,11 @@ mod tests {
             }
         }
         for (config, restricted) in cases {
-            app.setting
+            let mut candidate = app.setting.read().clone();
+            candidate.extra.insert("auth".into(), config.clone());
+            app.extensions
                 .write()
-                .extra
-                .insert("auth".into(), config.clone());
-            app.extensions.write().call_setting(&app.setting);
+                .call_setting(&app.setting, candidate)?;
             let request = TestRequest::get()
                 .uri("/")
                 .insert_header(("Accept", "application/nostr+json"))
@@ -359,7 +359,7 @@ mod tests {
                 "auth".into(),
                 json!({"enabled": enabled, "event": {"ip_whitelist": ["127.0.0.1"]}}),
             );
-            auth.setting(&setting);
+            auth.setting(&mut setting.write())?();
             let info: Value = serde_json::from_str(&setting.read().render_information()?)?;
             assert_eq!(info["limitation"]["restricted_writes"], json!(true));
         }
@@ -549,7 +549,7 @@ mod tests {
             }"#,
             )?;
         }
-        let app = app.add_extension(Auth::new());
+        let app = app.add_extension(Auth::new())?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));
@@ -637,7 +637,7 @@ mod tests {
                 pubkey.to_string()
             ))?;
         }
-        let app = app.add_extension(Auth::new());
+        let app = app.add_extension(Auth::new())?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));
@@ -744,7 +744,7 @@ mod tests {
             let mut w = app.setting.write();
             w.extra = serde_json::from_str(r#"{ "auth": { "enabled": false } }"#)?;
         }
-        let app = app.add_extension(Auth::new());
+        let app = app.add_extension(Auth::new())?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));
@@ -791,7 +791,7 @@ mod tests {
             let mut w = app.setting.write();
             w.extra = serde_json::from_str(r#"{ "auth": { "enabled": true } }"#)?;
         }
-        let app = app.add_extension(Auth::new());
+        let app = app.add_extension(Auth::new())?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));

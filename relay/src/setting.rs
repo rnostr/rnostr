@@ -1,6 +1,6 @@
 use crate::Error;
 use crate::{duration::NonZeroDuration, hash::NoOpHasherDefault, Result};
-use config::{Config, Environment, File, FileFormat, Source};
+use config::{Config, Environment, File, FileFormat, Source, ValueKind};
 use notify::{event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
@@ -20,8 +20,7 @@ use std::{
 use tracing::{error, info, warn};
 
 pub const CARGO_PKG_VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
-/// Quiet period after the last change before a watched config file is reloaded,
-/// so a file that is still being written is not applied half-finished.
+/// Quiet period used to coalesce bursts of configuration writes.
 const CONFIG_RELOAD_DELAY: Duration = Duration::from_millis(250);
 
 fn default_version() -> String {
@@ -49,17 +48,52 @@ fn default_nips() -> Vec<u32> {
     vec![1, 2, 4, 9, 11, 12, 15, 16, 20, 22, 25, 26, 28, 33, 40, 70]
 }
 
+fn ignore_version<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(default_version())
+}
+
+fn ignore_nips<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Vec<u32>, D::Error> {
+    serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(default_nips())
+}
+
+/// Deserialize a table or optional null, rejecting positional struct syntax.
+pub fn deserialize_table<'de, D: serde::Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> std::result::Result<T, D::Error> {
+    let table = Option::<serde_json::Map<String, Value>>::deserialize(deserializer)?;
+    T::deserialize(table.map(Value::Object).unwrap_or(Value::Null))
+        .map_err(serde::de::Error::custom)
+}
+
+/// Deserialize a list of configuration tables, rejecting positional struct syntax.
+pub fn deserialize_tables<'de, D: serde::Deserializer<'de>, T: DeserializeOwned>(
+    deserializer: D,
+) -> std::result::Result<Vec<T>, D::Error> {
+    let tables = Vec::<serde_json::Map<String, Value>>::deserialize(deserializer)?;
+    tables
+        .into_iter()
+        .map(|table| T::deserialize(Value::Object(table)))
+        .collect::<std::result::Result<_, _>>()
+        .map_err(serde::de::Error::custom)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Information {
     pub name: String,
     pub description: String,
     pub pubkey: Option<String>,
     pub contact: Option<String>,
     pub software: String,
-    #[serde(skip_deserializing)]
+    #[serde(deserialize_with = "ignore_version")]
     pub version: String,
-    #[serde(skip_deserializing)]
+    #[serde(deserialize_with = "ignore_nips")]
     pub supported_nips: Vec<u32>,
 }
 
@@ -78,7 +112,7 @@ impl Default for Information {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Data {
     pub path: PathBuf,
 
@@ -97,7 +131,7 @@ impl Default for Data {
 
 /// number of threads config
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Thread {
     /// number of http server threads
     pub http: usize,
@@ -107,7 +141,7 @@ pub struct Thread {
 
 /// network config
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Network {
     /// server bind host
     pub host: String,
@@ -141,7 +175,7 @@ impl Default for Network {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Limitation {
     /// this is the maximum number of bytes for incoming JSON. default 512K
     pub max_message_length: usize,
@@ -179,7 +213,7 @@ impl Default for Limitation {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Setting {
     pub information: Information,
@@ -194,7 +228,7 @@ pub struct Setting {
 
     /// extensions setting object
     #[serde(skip)]
-    extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>, NoOpHasherDefault>,
+    extensions: HashMap<TypeId, Arc<dyn Any + Send + Sync>, NoOpHasherDefault>,
 
     /// nip-11 extension information
     #[serde(skip)]
@@ -242,31 +276,8 @@ impl From<Setting> for SettingWrapper {
 }
 
 impl SettingWrapper {
-    /// Reload settings from file, with optional environment overrides.
-    pub fn reload<P: AsRef<Path>>(&self, file: P, env_prefix: Option<String>) -> Result<()> {
-        *self.write() = Setting::read(file, env_prefix)?;
-        Ok(())
-    }
-
-    /// Reload after a watched change. A file with no settings is most likely
-    /// truncated and about to be rewritten, so it is skipped.
-    fn reload_watched(&self, file: &Path, env_prefix: Option<&str>) -> Result<bool> {
-        let config = Config::builder().add_source(File::from(file)).build()?;
-        // Check the file before env overrides, then apply this same cached parse.
-        if config.collect()?.is_empty() {
-            warn!(file = %file.display(), "skipping reload: no settings in file");
-            return Ok(false);
-        }
-        let setting = Setting::from_config(config, env_prefix)?;
-        *self.write() = setting;
-        Ok(true)
-    }
-
-    /// config from file and watch file update then reload
-    ///
-    /// Reloads wait until the file has been unchanged for 250 ms and skip
-    /// files with no settings.
-    pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper) + Send + 'static>(
+    /// Read candidates on file changes; the callback validates and publishes them.
+    pub fn watch<P: AsRef<Path>, F: Fn(&SettingWrapper, Setting) -> Result<()> + Send + 'static>(
         file: P,
         env_prefix: Option<String>,
         f: F,
@@ -321,15 +332,17 @@ impl SettingWrapper {
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                         }
                     }
-                    // A panic must not end this thread, or later changes are lost.
                     let reload = panic::catch_unwind(AssertUnwindSafe(|| {
-                        match c_setting.reload_watched(&file, env_prefix.as_deref()) {
-                            Ok(true) => {
+                        match Setting::read_for_reload(&file, env_prefix.as_deref())
+                            .and_then(|candidate| candidate.map(|s| f(&c_setting, s)).transpose())
+                        {
+                            Ok(Some(())) => {
                                 info!("Reload config success {:?}", file);
                                 info!("{:?}", c_setting.read());
-                                f(&c_setting);
                             }
-                            Ok(false) => {}
+                            Ok(None) => {
+                                warn!(file = %file.display(), "skipping reload: no settings in file");
+                            }
                             Err(e) => {
                                 error!(error = e.to_string(), "failed to reload config {:?}", file);
                             }
@@ -359,6 +372,14 @@ fn config_changed(event: &Event, file: &Path) -> bool {
 }
 
 impl Setting {
+    pub(crate) fn read_for_reload(file: &Path, env_prefix: Option<&str>) -> Result<Option<Self>> {
+        let source = Config::builder().add_source(File::from(file)).build()?;
+        if matches!(&source.cache.kind, ValueKind::Table(table) if table.is_empty()) {
+            return Ok(None);
+        }
+        Self::from_file_config(source, env_prefix).map(Some)
+    }
+
     /// add supported nips for nip-11 information
     pub fn add_nip(&mut self, nip: u32) {
         if !self.information.supported_nips.contains(&nip) {
@@ -390,22 +411,20 @@ impl Setting {
     }
 
     /// Parse extension setting.
-    pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> T {
-        self.extra
-            .get(key)
-            .and_then(|v| {
-                let r = T::deserialize(v);
-                if let Err(err) = &r {
-                    error!(error = err.to_string(), "failed to parse {:?} setting", key);
-                }
-                r.ok()
-            })
-            .unwrap_or_default()
+    pub fn parse_extension<T: DeserializeOwned + Default>(&self, key: &str) -> Result<T> {
+        match self.extra.get(key) {
+            None => Ok(T::default()),
+            Some(value) if value.is_object() => T::deserialize(value)
+                .map_err(|err| Error::Message(format!("invalid [{key}] configuration: {err}"))),
+            Some(_) => Err(Error::Message(format!(
+                "invalid [{key}] configuration: expected a table"
+            ))),
+        }
     }
 
     /// save extension setting
     pub fn set_extension<T: Send + Sync + 'static>(&mut self, val: T) {
-        self.extensions.insert(TypeId::of::<T>(), Box::new(val));
+        self.extensions.insert(TypeId::of::<T>(), Arc::new(val));
     }
 
     /// get extension setting
@@ -445,19 +464,14 @@ impl Setting {
         let config = Config::builder()
             .add_source(File::from(file.as_ref()))
             .build()?;
-        Self::from_config(config, env_prefix.as_deref())
+        Self::from_file_config(config, env_prefix.as_deref())
     }
 
-    fn from_config(config: Config, env_prefix: Option<&str>) -> Result<Self> {
-        let mut config = Config::builder().add_source(config);
+    fn from_file_config(mut config: Config, env_prefix: Option<&str>) -> Result<Self> {
         if let Some(prefix) = env_prefix {
-            config = config.add_source(Self::env_source(prefix));
+            Self::env_source(prefix).collect_to(&mut config.cache)?;
         }
-
-        let config = config.build()?;
-        let mut setting: Setting = config.try_deserialize()?;
-        setting.correct();
-        Ok(setting)
+        Self::from_config(config)
     }
 
     fn env_source(prefix: &str) -> Environment {
@@ -473,27 +487,37 @@ impl Setting {
     pub fn from_env(env_prefix: String) -> Result<Self> {
         let mut config = Config::builder();
         config = config.add_source(Self::env_source(&env_prefix));
-        let config = config.build()?;
-        let mut setting: Setting = config.try_deserialize()?;
-        setting.correct();
-        Ok(setting)
+        Self::from_config(config.build()?)
     }
 
     /// config from str
     pub fn from_str(s: &str, format: FileFormat) -> Result<Self> {
         let builder = Config::builder();
-        let config = builder.add_source(File::from_str(s, format)).build()?;
-        let mut setting: Setting = config.try_deserialize()?;
-        setting.correct();
-        Ok(setting)
+        Self::from_config(builder.add_source(File::from_str(s, format)).build()?)
     }
 
-    fn correct(&mut self) {
-        if self.network.heartbeat_timeout <= self.network.heartbeat_interval {
-            error!("network heartbeat_timeout must bigger than heartbeat_interval, use defaults");
-            self.network.heartbeat_interval = Duration::from_secs(60).try_into().unwrap();
-            self.network.heartbeat_timeout = Duration::from_secs(120).try_into().unwrap();
+    fn from_config(config: Config) -> Result<Self> {
+        if let ValueKind::Table(table) = &config.cache.kind {
+            for section in ["information", "data", "thread", "network", "limitation"] {
+                if table
+                    .get(section)
+                    .is_some_and(|value| !matches!(&value.kind, ValueKind::Table(_)))
+                {
+                    return Err(Error::Message(format!(
+                        "invalid [{section}] configuration: expected a table"
+                    )));
+                }
+            }
         }
+        let setting: Self = serde_path_to_error::deserialize(config)
+            .map_err(|err| Error::Message(format!("invalid configuration: {err}")))?;
+        if setting.network.heartbeat_timeout <= setting.network.heartbeat_interval {
+            return Err(Error::Message(
+                "network.heartbeat_timeout must be greater than network.heartbeat_interval"
+                    .to_owned(),
+            ));
+        }
+        Ok(setting)
     }
 }
 
@@ -503,12 +527,32 @@ mod tests {
     use anyhow::Result;
     use config::FileFormat;
     use notify::event::{CreateKind, DataChange, RenameMode};
-    use std::{
-        fs,
-        io::Write,
-        time::{Duration, Instant},
-    };
+    use std::{fs, io::Write, time::Duration};
     use tempfile::Builder;
+
+    #[test]
+    fn serialized_settings_accept_read_only_metadata_without_trusting_it() -> Result<()> {
+        let mut original = Setting::default();
+        original.information.name = "saved".to_owned();
+        original.information.version = "forged".to_owned();
+        original.information.supported_nips = vec![999];
+        let text = serde_json::to_string(&original)?;
+        for restored in [
+            serde_json::from_str::<Setting>(&text)?,
+            Setting::from_str(&text, FileFormat::Json)?,
+        ] {
+            assert_eq!(restored.information.name, "saved");
+            assert_eq!(restored.information.version, default_version());
+            assert_eq!(restored.information.supported_nips, default_nips());
+        }
+        let restored = Setting::from_str(
+            r#"{"information":{"version":null,"supported_nips":false}}"#,
+            FileFormat::Json,
+        )?;
+        assert_eq!(restored.information.version, default_version());
+        assert_eq!(restored.information.supported_nips, default_nips());
+        Ok(())
+    }
 
     #[test]
     fn environment_values_keep_their_text_until_typed() -> Result<()> {
@@ -547,7 +591,7 @@ mod tests {
                     Duration::from(setting.network.heartbeat_interval),
                     Duration::from_secs(30)
                 );
-                let policy: Policy = setting.parse_extension("policy");
+                let policy: Policy = setting.parse_extension("policy")?;
                 assert!(policy.enabled);
                 assert_eq!(policy.limit, 3);
                 assert_eq!(policy.ratio, 0.5);
@@ -562,6 +606,85 @@ mod tests {
                 Ok(())
             },
         )
+    }
+
+    #[test]
+    fn invalid_core_sections_and_unknown_fields_are_rejected() -> Result<()> {
+        for section in ["information", "data", "thread", "network", "limitation"] {
+            for value in [
+                json!([]),
+                json!(true),
+                json!(1),
+                json!(null),
+                json!({"typo": 1}),
+            ] {
+                let text = json!({section: value}).to_string();
+                let error = Setting::from_str(&text, FileFormat::Json).unwrap_err();
+                assert!(error.to_string().contains(section), "{text}: {error}");
+            }
+        }
+        let setting = Setting::from_str("[custom_plugin]\noption = true", FileFormat::Toml)?;
+        assert_eq!(setting.extra["custom_plugin"]["option"], true);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_heartbeat_settings_are_rejected() {
+        for timeout in ["30s", "60s"] {
+            let text = format!(
+                "[network]\nheartbeat_interval = \"60s\"\nheartbeat_timeout = \"{timeout}\""
+            );
+            let error = Setting::from_str(&text, FileFormat::Toml).unwrap_err();
+            assert!(error.to_string().contains("network.heartbeat_timeout"));
+        }
+    }
+
+    #[test]
+    fn extension_parser_preserves_defaults_but_rejects_invalid_sections() -> Result<()> {
+        #[derive(Deserialize, Default)]
+        #[serde(default, deny_unknown_fields)]
+        struct Policy {
+            enabled: bool,
+        }
+
+        let mut setting = Setting::default();
+        assert!(!setting.parse_extension::<Policy>("policy")?.enabled);
+        for value in [json!({}), json!({"enabled": true})] {
+            setting.extra.insert("policy".to_owned(), value);
+            setting.parse_extension::<Policy>("policy")?;
+        }
+        for value in [
+            json!([]),
+            json!(null),
+            json!(true),
+            json!(1),
+            json!("bad"),
+            json!({"enabled": "yes"}),
+            json!({"enabld": true}),
+        ] {
+            setting.extra.insert("policy".to_owned(), value);
+            let error = setting.parse_extension::<Policy>("policy").err().unwrap();
+            assert!(error.to_string().contains("[policy]"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn environment_overrides_are_validated() {
+        for (name, value, expected) in [
+            ("STRICT_CONFIG_NETWORK__PRT", "8080", "prt"),
+            ("STRICT_CONFIG_NETWORK__PORT", "bad", "network"),
+            (
+                "STRICT_CONFIG_NETWORK__HEARTBEAT_TIMEOUT",
+                "10s",
+                "heartbeat_timeout",
+            ),
+        ] {
+            temp_env::with_var(name, Some(value), || {
+                let error = Setting::from_env("STRICT_CONFIG".to_owned()).unwrap_err();
+                assert!(error.to_string().contains(expected), "{error}");
+            });
+        }
     }
 
     #[test]
@@ -735,120 +858,56 @@ mod tests {
         Ok(())
     }
 
-    fn reload_event(
-        setting: &SettingWrapper,
-        event: &Event,
-        file: &Path,
-        env_prefix: Option<&str>,
-    ) -> Result<bool> {
-        Ok(config_changed(event, file) && setting.reload_watched(file, env_prefix)?)
-    }
-
     #[test]
-    fn watcher_sequences_skip_empty_files_and_load_created_replacements() -> Result<()> {
+    fn watched_candidates_skip_empty_and_invalid_files() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("relay.toml");
-        let content = |name| format!("[information]\nname = '{name}'\n[network]\nport = 9001\n");
-        fs::write(&path, content("initial"))?;
-        let setting: SettingWrapper = Setting::read(&path, None)?.into();
-        let create = Event::new(EventKind::Create(CreateKind::File)).add_path(path.clone());
-        let modify =
-            Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Any))).add_path(path.clone());
         for recreate in [false, true] {
-            let previous = setting.read().information.name.clone();
             if recreate {
                 fs::remove_file(&path)?;
-                assert!(!reload_event(&setting, &modify, &path, None)?);
             }
             for content in ["", " \n\t ", "# file is still being written\n"] {
                 fs::write(&path, content)?;
-                for event in [&create, &modify] {
-                    assert!(!reload_event(&setting, event, &path, None)?);
-                    assert_eq!(setting.read().information.name, previous);
-                    assert_eq!(setting.read().network.port, 9001);
-                }
+                assert!(Setting::read_for_reload(&path, None)?.is_none());
             }
             fs::write(&path, "[network]\nport = ")?;
-            assert!(reload_event(&setting, &create, &path, None).is_err());
-            assert!(reload_event(&setting, &modify, &path, None).is_err());
-            assert_eq!(setting.read().information.name, previous);
-            assert_eq!(setting.read().network.port, 9001);
-            fs::write(&path, content("complete"))?;
-            assert!(reload_event(&setting, &create, &path, None)?);
-            assert_eq!(setting.read().information.name, "complete");
-        }
-        fs::write(&path, content("atomic"))?;
-        for mode in [RenameMode::To, RenameMode::Both] {
-            let mut event = Event::new(EventKind::Modify(ModifyKind::Name(mode)));
-            if mode == RenameMode::Both {
-                event = event.add_path(dir.path().join("replacement.toml"));
-            }
-            event = event.add_path(path.clone());
-            assert!(reload_event(&setting, &event, &path, None)?);
+            assert!(Setting::read_for_reload(&path, None).is_err());
+            fs::write(
+                &path,
+                "[information]\nname = 'complete'\n[network]\nport = 9001\n",
+            )?;
+            let candidate = Setting::read_for_reload(&path, None)?.unwrap();
+            assert_eq!(candidate.information.name, "complete");
+            assert_eq!(candidate.network.port, 9001);
         }
         Ok(())
     }
 
     #[test]
-    fn reload_preserves_json_format_and_environment_overrides() -> Result<()> {
+    fn watched_candidates_preserve_json_and_environment_overrides() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("relay.json");
-        fs::write(&path, r#"{"information":{"name":"initial"}}"#)?;
-        let setting: SettingWrapper = Setting::read(&path, None)?.into();
         temp_env::with_vars(
             [("RELOAD_JSON_TEST_NETWORK__PORT", Some("9003"))],
             || -> Result<()> {
                 fs::write(&path, "{}")?;
-                let event = Event::new(EventKind::Create(notify::event::CreateKind::File))
-                    .add_path(path.clone());
-                assert!(!reload_event(
-                    &setting,
-                    &event,
-                    &path,
-                    Some("RELOAD_JSON_TEST")
-                )?);
-                assert_eq!(setting.read().information.name, "initial");
+                assert!(Setting::read_for_reload(&path, Some("RELOAD_JSON_TEST"))?.is_none());
+                assert_eq!(
+                    Setting::read(&path, Some("RELOAD_JSON_TEST".to_owned()))?
+                        .network
+                        .port,
+                    9003
+                );
                 fs::write(
                     &path,
                     r#"{"information":{"name":"updated"},"network":{"port":9002}}"#,
                 )?;
-                setting.reload(&path, Some("RELOAD_JSON_TEST".into()))?;
-                assert_eq!(setting.read().information.name, "updated");
-                assert_eq!(setting.read().network.port, 9003);
-                // Unlike the watcher, an explicit reload applies an empty file.
-                fs::write(&path, "{}")?;
-                setting.reload(&path, Some("RELOAD_JSON_TEST".into()))?;
-                assert_eq!(setting.read().information, Information::default());
+                let candidate = Setting::read_for_reload(&path, Some("RELOAD_JSON_TEST"))?.unwrap();
+                assert_eq!(candidate.information.name, "updated");
+                assert_eq!(candidate.network.port, 9003);
                 Ok(())
             },
         )?;
-        Ok(())
-    }
-
-    #[test]
-    fn watch() -> Result<()> {
-        let dir = tempfile::tempdir()?;
-        let path = dir.path().join("relay.toml");
-        let content = |name: &str| format!("[information]\nname = '{name}'\n");
-        fs::write(&path, content("initial"))?;
-        let (changed, changes) = std::sync::mpsc::channel();
-        let setting = SettingWrapper::watch(&path, None, move |setting| {
-            let _ = changed.send(setting.read().information.name.clone());
-        })?;
-        for (name, atomic) in [("inplace", false), ("atomic", true)] {
-            if atomic {
-                let replacement = dir.path().join("replacement.toml");
-                fs::write(&replacement, content(name))?;
-                fs::rename(replacement, &path)?;
-            } else {
-                fs::write(&path, content(name))?;
-            }
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while changes.recv_timeout(deadline.saturating_duration_since(Instant::now()))? != name
-            {
-            }
-            assert_eq!(setting.read().information.name, name);
-        }
         Ok(())
     }
 
@@ -858,9 +917,11 @@ mod tests {
         let path = dir.path().join("relay.toml");
         fs::write(&path, "[information]\nname = 'initial'\n")?;
         let (changed, changes) = std::sync::mpsc::channel();
-        let setting = SettingWrapper::watch(&path, None, move |setting| {
+        let setting = SettingWrapper::watch(&path, None, move |setting, candidate| {
+            *setting.write() = candidate;
             let setting = setting.read();
             let _ = changed.send((setting.information.name.clone(), setting.network.port));
+            Ok(())
         })?;
         // The first chunk alone is a valid configuration.
         let mut writer = fs::File::create(&path)?;
@@ -883,10 +944,12 @@ mod tests {
         let content = |name: &str| format!("[information]\nname = '{name}'\n");
         fs::write(&path, content("initial"))?;
         let (changed, changes) = std::sync::mpsc::channel();
-        let _setting = SettingWrapper::watch(&path, None, move |setting| {
+        let _setting = SettingWrapper::watch(&path, None, move |setting, candidate| {
+            *setting.write() = candidate;
             let name = setting.read().information.name.clone();
             let _ = changed.send(name.clone());
             assert_ne!(name, "panic");
+            Ok(())
         })?;
         for name in ["panic", "recovered"] {
             fs::write(&path, content(name))?;

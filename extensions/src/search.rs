@@ -1,11 +1,11 @@
 use nostr_relay::{
     message::{ClientMessage, IncomingMessage},
-    setting::SettingWrapper,
-    Extension, ExtensionMessageResult, Session,
+    Extension, ExtensionMessageResult, Result, Session, Setting, SettingUpdate,
 };
 use serde::Deserialize;
 
 #[derive(Deserialize, Default, Debug)]
+#[serde(default, deny_unknown_fields)]
 pub struct SearchSetting {
     #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
@@ -27,12 +27,12 @@ impl Extension for Search {
         "search"
     }
 
-    fn setting(&mut self, setting: &SettingWrapper) {
-        let mut w = setting.write();
-        self.setting = w.parse_extension(self.name());
-        if self.setting.enabled {
-            w.add_nip(50);
+    fn setting<'a>(&'a mut self, setting: &mut Setting) -> Result<SettingUpdate<'a>> {
+        let parsed: SearchSetting = setting.parse_extension(self.name())?;
+        if parsed.enabled {
+            setting.add_nip(50);
         }
+        Ok(Box::new(move || self.setting = parsed))
     }
 
     fn message(
@@ -101,7 +101,7 @@ mod tests {
             )?;
         }
 
-        let app = app.add_extension(Search::new());
+        let app = app.add_extension(Search::new())?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));

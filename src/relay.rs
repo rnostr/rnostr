@@ -39,11 +39,11 @@ async fn run_relay(config: &PathBuf, watch: bool) -> Result<()> {
     let app_data = App::create(Some(config), watch, Some("RNOSTR".to_owned()), None)?;
     let db = app_data.db.clone();
     app_data
-        .add_extension(nostr_extensions::Metrics::new())
-        .add_extension(nostr_extensions::Auth::new())
-        .add_extension(nostr_extensions::Ratelimiter::new())
-        .add_extension(nostr_extensions::Count::new(db))
-        .add_extension(nostr_extensions::Search::new())
+        .add_extension(nostr_extensions::Metrics::new())?
+        .add_extension(nostr_extensions::Auth::new())?
+        .add_extension(nostr_extensions::Ratelimiter::new())?
+        .add_extension(nostr_extensions::Count::new(db))?
+        .add_extension(nostr_extensions::Search::new())?
         .web_server()?
         .await?;
     info!("Relay server shutdown");

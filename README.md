@@ -38,7 +38,13 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 The library [nostr-relay](./relay/) implements a simple extension mechanism to intercept user messages for custom processing. rnostr is built on top of [nostr-relay](./relay/) and implements several simple extensions.
 All extensions support configuration in the [config file](./rnostr.example.toml).
 
-[Custom relay and extensions](./relay/).
+Invalid configuration prevents startup; invalid reloads keep all previous
+settings. Unknown fields in core and registered extension tables are errors,
+even when disabled; unregistered sections remain allowed. Missing fields default,
+and read-only information fields `version` and `supported_nips` are ignored.
+
+Heartbeat errors now reject startup or reload instead of falling back to defaults.
+The timeout must exceed the interval: `"2m"` needs a timeout such as `"4m"`.
 
 #### Metrics
 
@@ -99,6 +105,8 @@ With `--watch`, the config is reloaded once the file has been unchanged for 250 
 a file with no settings is skipped. To update it safely, write the new config to a
 temporary file in the same directory and rename it over the watched file: a writer
 that pauses mid-file for longer than that can get a partial config applied.
+The watcher resolves symlinks at startup; replacing a symlink does not switch
+its watched target.
 
 Japanese and Korean search tokenization are enabled by default. Their dictionaries
 are downloaded by Lindera build scripts during compilation. To build without
