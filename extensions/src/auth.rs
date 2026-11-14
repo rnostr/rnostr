@@ -49,6 +49,31 @@ pub struct Auth {
     setting: AuthSetting,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Denial {
+    AuthenticationRequired,
+    Restricted(&'static str),
+}
+
+impl Denial {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::AuthenticationRequired => "NIP-42 auth required",
+            Self::Restricted(reason) => reason,
+        }
+    }
+}
+
+impl std::fmt::Display for Denial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let prefix = match self {
+            Self::AuthenticationRequired => "auth-required",
+            Self::Restricted(_) => "restricted",
+        };
+        write!(f, "{prefix}: {}", self.reason())
+    }
+}
+
 pub enum AuthState {
     /// The AUTH challenge
     Challenge(String),
@@ -87,15 +112,26 @@ impl Auth {
         event_tags: Option<&Vec<Vec<String>>>,
         ip: &String,
     ) -> Result<(), &'static str> {
+        Self::check_permission(permission, pubkey, event_pubkey, event_tags, ip)
+            .map_err(Denial::reason)
+    }
+
+    fn check_permission(
+        permission: Option<&Permission>,
+        pubkey: Option<&String>,
+        event_pubkey: Option<&String>,
+        event_tags: Option<&Vec<Vec<String>>>,
+        ip: &String,
+    ) -> Result<(), Denial> {
         if let Some(permission) = permission {
             if let Some(list) = &permission.ip_whitelist {
                 if !list.contains(ip) {
-                    return Err("ip not in whitelist");
+                    return Err(Denial::Restricted("ip not in whitelist"));
                 }
             }
             if let Some(list) = &permission.ip_blacklist {
                 if list.contains(ip) {
-                    return Err("ip in blacklist");
+                    return Err(Denial::Restricted("ip in blacklist"));
                 }
             }
 
@@ -113,12 +149,12 @@ impl Auth {
                             false
                         };
                     if !whitelisted_pubkey_is_mentioned && !list.contains(pubkey) {
-                        return Err("event author pubkey not in whitelist");
+                        return Err(Denial::Restricted("event author pubkey not in whitelist"));
                     }
                 }
                 if let Some(list) = &permission.event_pubkey_blacklist {
                     if list.contains(pubkey) {
-                        return Err("event author pubkey in blacklist");
+                        return Err(Denial::Restricted("event author pubkey in blacklist"));
                     }
                 }
             }
@@ -126,19 +162,19 @@ impl Auth {
             if let Some(list) = &permission.pubkey_whitelist {
                 if let Some(pubkey) = pubkey {
                     if !list.contains(pubkey) {
-                        return Err("pubkey not in whitelist");
+                        return Err(Denial::Restricted("pubkey not in whitelist"));
                     }
                 } else {
-                    return Err("NIP-42 auth required");
+                    return Err(Denial::AuthenticationRequired);
                 }
             }
             if let Some(list) = &permission.pubkey_blacklist {
                 if let Some(pubkey) = pubkey {
                     if list.contains(pubkey) {
-                        return Err("pubkey in blacklist");
+                        return Err(Denial::Restricted("pubkey in blacklist"));
                     }
                 } else {
-                    return Err("NIP-42 auth required");
+                    return Err(Denial::AuthenticationRequired);
                 }
             }
         }
@@ -189,80 +225,80 @@ impl Extension for Auth {
                 IncomingMessage::Auth(event) => {
                     if let Some(AuthState::Challenge(challenge)) = state {
                         if let Err(err) = event.validate(now(), 0, 0) {
+                            let reason = match err {
+                                nostr_relay::db::Error::Invalid(reason) => reason,
+                                err => err.to_string(),
+                            };
                             return OutgoingMessage::ok(
                                 &event.id_str(),
                                 false,
-                                &format!("auth-required: {}", err),
+                                &format!("invalid: {}", reason),
                             )
                             .into();
-                        } else if event.kind() == 22242 {
-                            for tag in event.tags() {
-                                if tag.len() > 1 && tag[0] == "challenge" && &tag[1] == challenge {
-                                    session.set(AuthState::Pubkey(event.pubkey_str()));
-                                    return OutgoingMessage::ok(&event.id_str(), true, "").into();
-                                }
-                            }
                         }
+                        let invalid = if event.kind() != 22242 {
+                            Some("invalid: expected AUTH event kind 22242")
+                        } else if !event.tags().iter().any(|tag| {
+                            tag.len() > 1 && tag[0] == "challenge" && &tag[1] == challenge
+                        }) {
+                            Some("invalid: AUTH challenge does not match")
+                        } else {
+                            None
+                        };
+                        if let Some(reason) = invalid {
+                            return OutgoingMessage::ok(&event.id_str(), false, reason).into();
+                        }
+                        session.set(AuthState::Pubkey(event.pubkey_str()));
+                        return OutgoingMessage::ok(&event.id_str(), true, "").into();
                     }
                     return OutgoingMessage::ok(
                         &event.id_str(),
                         false,
-                        "auth-required: need reconnect",
+                        "error: already authenticated or no pending challenge; reconnect",
                     )
                     .into();
                 }
                 IncomingMessage::Event(event) => {
-                    if let Err(err) = Self::verify_permission(
+                    let permission = Self::check_permission(
                         self.setting.event.as_ref(),
                         state.and_then(|s| s.pubkey()),
                         Some(&event.pubkey_str()),
                         Some(event.tags()),
                         session.ip(),
-                    ) {
-                        counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err).increment(1);
-                        return OutgoingMessage::ok(
-                            &event.id_str(),
-                            false,
-                            &format!("auth-required: {}", err),
-                        )
-                        .into();
-                    } else {
-                        // check nip70 protected event
-                        for tag in event.tags() {
-                            if tag.len() == 1 && tag[0] == "-" {
-                                if let Some(AuthState::Pubkey(pubkey)) = state {
-                                    if pubkey != &event.pubkey_str() {
-                                        return OutgoingMessage::ok(
-                                            &event.id_str(),
-                                            false,
-                                            "auth-required: this event may only be published by its author",
-                                        )
-                                        .into();
-                                    }
-                                } else {
-                                    return OutgoingMessage::ok(
-                                        &event.id_str(),
-                                        false,
-                                        "auth-required: this event require authorization",
-                                    )
-                                    .into();
-                                }
-                                break;
+                    )
+                    .and_then(|()| {
+                        if event
+                            .tags()
+                            .iter()
+                            .any(|tag| tag.len() == 1 && tag[0] == "-")
+                        {
+                            match state.and_then(AuthState::pubkey) {
+                                Some(pubkey) if pubkey == &event.pubkey_str() => Ok(()),
+                                Some(_) => Err(Denial::Restricted(
+                                    "this event may only be published by its author",
+                                )),
+                                None => Err(Denial::AuthenticationRequired),
                             }
+                        } else {
+                            Ok(())
                         }
+                    });
+                    if let Err(err) = permission {
+                        counter!("nostr_relay_auth_unauthorized", "command" => "EVENT", "reason" => err.reason()).increment(1);
+                        return OutgoingMessage::ok(&event.id_str(), false, &err.to_string())
+                            .into();
                     }
                 }
                 IncomingMessage::Req(sub) | IncomingMessage::Count(sub) => {
-                    if let Err(err) = Self::verify_permission(
+                    if let Err(err) = Self::check_permission(
                         self.setting.req.as_ref(),
                         state.and_then(|s| s.pubkey()),
                         None,
                         None,
                         session.ip(),
                     ) {
-                        counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err).increment(1);
-                        let msg = format!("auth-required: {}", err);
-                        return OutgoingMessage::closed(&sub.id, &msg).into();
+                        counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err.reason()).increment(1);
+                        return OutgoingMessage::closed(&sub.id, &err.to_string()).into();
                     }
                 }
                 _ => {}
@@ -274,6 +310,7 @@ impl Extension for Auth {
 
 #[cfg(test)]
 mod tests {
+    use super::Denial::{AuthenticationRequired, Restricted};
     use super::*;
     use crate::create_test_app;
     use actix_web::{
@@ -370,8 +407,8 @@ mod tests {
     }
 
     #[test]
-    fn empty_pubkey_blacklist_requires_authentication() {
-        let permission = Permission {
+    fn verify_permission_wrapper() {
+        let mut permission = Permission {
             pubkey_blacklist: Some(List::default()),
             ..Default::default()
         };
@@ -389,147 +426,183 @@ mod tests {
             &ip,
         )
         .is_ok());
+        permission.ip_blacklist = Some(vec![ip.clone()].into());
+        assert_eq!(
+            Auth::verify_permission(Some(&permission), None, None, None, &ip),
+            Err("ip in blacklist")
+        );
     }
 
     #[test]
     fn verify() -> Result<()> {
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                ip_whitelist: Some(vec!["127.0.0.1".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            None,
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_ok());
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                ip_whitelist: Some(vec!["127.0.0.1".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            None,
-            None,
-            &"127.0.0.2".to_owned()
-        )
-        .is_err());
+        let login_required = Err(AuthenticationRequired);
+        let ip_whitelist = Err(Restricted("ip not in whitelist"));
+        let ip_blacklist = Err(Restricted("ip in blacklist"));
+        let pubkey_whitelist = Err(Restricted("pubkey not in whitelist"));
+        let pubkey_blacklist = Err(Restricted("pubkey in blacklist"));
+        let author_whitelist = Err(Restricted("event author pubkey not in whitelist"));
+        let author_blacklist = Err(Restricted("event author pubkey in blacklist"));
 
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                ip_blacklist: Some(vec!["127.0.0.1".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            None,
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_err());
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                ip_blacklist: Some(vec!["127.0.0.1".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            None,
-            None,
-            &"127.0.0.2".to_owned()
-        )
-        .is_ok());
+        let allow_key = json!({"pubkey_whitelist": ["key"]});
+        let block_key = json!({"pubkey_blacklist": ["key"]});
+        let allow_author = json!({"event_pubkey_whitelist": ["key"]});
+        let block_author = json!({"event_pubkey_blacklist": ["key"]});
+        let author_and_key =
+            json!({"event_pubkey_whitelist": ["key"], "pubkey_whitelist": ["key"]});
 
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                pubkey_whitelist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            Some(&"xx".to_owned()),
-            None,
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_ok());
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                pubkey_whitelist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            Some(&"xxxx".to_owned()),
-            None,
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_err());
+        for (config, identity, author, expected) in [
+            (&json!({}), None, None, Ok(())),
+            (&json!({"ip_whitelist": ["ip"]}), None, None, Ok(())),
+            (
+                &json!({"ip_whitelist": ["other"]}),
+                None,
+                None,
+                ip_whitelist,
+            ),
+            (&json!({"ip_blacklist": ["ip"]}), None, None, ip_blacklist),
+            (&json!({"ip_blacklist": ["other"]}), None, None, Ok(())),
+            (&allow_key, None, None, login_required),
+            (&allow_key, Some("key"), None, Ok(())),
+            (&allow_key, Some("other"), None, pubkey_whitelist),
+            (&block_key, None, None, login_required),
+            (&block_key, Some("key"), None, pubkey_blacklist),
+            (&block_key, Some("other"), None, Ok(())),
+            (&allow_author, None, Some("key"), Ok(())),
+            (&allow_author, None, Some("other"), author_whitelist),
+            (&block_author, None, Some("key"), author_blacklist),
+            (&block_author, None, Some("other"), Ok(())),
+            (&allow_author, None, None, Ok(())),
+            (&block_author, None, None, Ok(())),
+            (&author_and_key, None, Some("other"), author_whitelist),
+            (&author_and_key, None, Some("key"), login_required),
+            (
+                &json!({"ip_blacklist": ["ip"], "pubkey_whitelist": ["key"]}),
+                None,
+                None,
+                ip_blacklist,
+            ),
+            (&author_and_key, Some("key"), None, Ok(())),
+            (&author_and_key, None, None, login_required),
+        ] {
+            let permission = serde_json::from_value(config.clone())?;
+            let identity = identity.map(str::to_owned);
+            let author = author.map(str::to_owned);
+            let ip = "ip".to_owned();
+            assert_eq!(
+                Auth::check_permission(
+                    Some(&permission),
+                    identity.as_ref(),
+                    author.as_ref(),
+                    None,
+                    &ip
+                ),
+                expected,
+                "{config}, identity={identity:?}, author={author:?}"
+            );
+        }
+        Ok(())
+    }
 
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                pubkey_blacklist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            Some(&"xx".to_owned()),
-            None,
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_err());
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                pubkey_blacklist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            Some(&"xxxx".to_owned()),
-            None,
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_ok());
-
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                event_pubkey_whitelist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            Some(&"xx".to_owned()),
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_ok());
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                event_pubkey_whitelist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            Some(&"xxxx".to_owned()),
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_err());
-
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                event_pubkey_blacklist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            Some(&"xx".to_owned()),
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_err());
-        assert!(Auth::verify_permission(
-            Some(&Permission {
-                event_pubkey_blacklist: Some(vec!["xx".to_string()].into()),
-                ..Default::default()
-            }),
-            None,
-            Some(&"xxxx".to_owned()),
-            None,
-            &"127.0.0.1".to_owned()
-        )
-        .is_ok());
+    #[actix_rt::test]
+    async fn protocol_response_prefixes() -> Result<()> {
+        let app = web::Data::new(create_test_app("auth-denials")?);
+        let key = Keypair::new_global(&mut thread_rng());
+        let challenge = vec![vec!["challenge".into(), "challenge".into()]];
+        let valid_auth = Event::create(&key, now(), 22242, challenge.clone(), String::new())?;
+        let mut invalid_auth = vec![
+            (
+                Event::create(&key, now(), 1, challenge, String::new())?,
+                "invalid: expected AUTH event kind 22242",
+            ),
+            (
+                Event::create(
+                    &key,
+                    now(),
+                    22242,
+                    vec![vec!["challenge".into(), "wrong".into()]],
+                    String::new(),
+                )?,
+                "invalid: AUTH challenge does not match",
+            ),
+        ];
+        for (field, bytes, reason) in [
+            ("id", 32, "invalid: bad event id"),
+            ("sig", 64, "invalid: signature is wrong"),
+        ] {
+            let mut value = serde_json::to_value(&valid_auth)?;
+            value[field] = json!("00".repeat(bytes));
+            invalid_auth.push((serde_json::from_value(value)?, reason));
+        }
+        let body = ws::WebsocketContext::with_factory(
+            futures_util::stream::pending::<Result<bytes::Bytes, actix_web::error::PayloadError>>(),
+            move |ctx| {
+                let mut session = Session::new("127.0.0.1".into(), app);
+                let auth = Auth {
+                    setting: AuthSetting {
+                        enabled: true,
+                        ..Default::default()
+                    },
+                };
+                let mut process = |incoming, session: &mut Session| {
+                    auth.message(ClientMessage::new(0, String::new(), incoming), session, ctx)
+                };
+                session.set(AuthState::Challenge("challenge".into()));
+                for (event, reason) in invalid_auth.into_iter().chain([
+                    (valid_auth.clone(), ""),
+                    (
+                        valid_auth,
+                        "error: already authenticated or no pending challenge; reconnect",
+                    ),
+                ]) {
+                    let ExtensionMessageResult::Stop(out) =
+                        process(IncomingMessage::Auth(event), &mut session)
+                    else {
+                        panic!("expected AUTH response");
+                    };
+                    let reply: Value = serde_json::from_str(&out.0).unwrap();
+                    assert_eq!(reply[2], json!(reason.is_empty()), "{reply}");
+                    assert_eq!(reply[3], reason);
+                }
+                session.set(AuthState::Challenge("challenge".into()));
+                for (permission, prefix) in [
+                    (json!({"event_pubkey_whitelist": ["other"]}), None),
+                    (json!({"event_pubkey_blacklist": ["key"]}), None),
+                    (
+                        json!({"event_pubkey_whitelist": ["other"], "pubkey_whitelist": ["key"]}),
+                        Some("auth-required:"),
+                    ),
+                ] {
+                    let read_auth = Auth {
+                        setting: AuthSetting {
+                            enabled: true,
+                            req: Some(serde_json::from_value(permission).unwrap()),
+                            ..Default::default()
+                        },
+                    };
+                    for command in ["REQ", "COUNT"] {
+                        let incoming =
+                            serde_json::from_str(&format!(r#"["{command}", "sub", {{}}]"#))
+                                .unwrap();
+                        let result = read_auth.message(
+                            ClientMessage::new(0, String::new(), incoming),
+                            &mut session,
+                            ctx,
+                        );
+                        match (prefix, result) {
+                            (None, ExtensionMessageResult::Continue(_)) => {}
+                            (Some(prefix), ExtensionMessageResult::Stop(out)) => {
+                                let reply: Value = serde_json::from_str(&out.0).unwrap();
+                                assert_eq!(reply[0], "CLOSED");
+                                assert!(reply[2].as_str().unwrap().starts_with(prefix), "{reply}");
+                            }
+                            _ => panic!("unexpected {command} response"),
+                        }
+                    }
+                }
+                session
+            },
+        );
+        drop(body);
         Ok(())
     }
 
@@ -578,7 +651,7 @@ mod tests {
             ))
             .await?;
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.3.contains("invalid"));
+        assert!(notice.3.starts_with("invalid:"));
 
         let event = Event::create(&key_pair, now(), 22242, vec![], "".to_owned())?;
         framed
@@ -587,7 +660,7 @@ mod tests {
             ))
             .await?;
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.3.contains("need"));
+        assert!(notice.3.starts_with("invalid:"));
 
         let event = Event::create(
             &key_pair,
@@ -722,7 +795,7 @@ mod tests {
             ))
             .await?;
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
-        assert!(notice.3.contains("auth-required"));
+        assert!(notice.3.starts_with("restricted:"));
         assert!(!notice.2);
 
         framed
@@ -819,7 +892,7 @@ mod tests {
             .await?;
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
         assert!(!notice.2);
-        assert!(notice.3.contains("authorization"));
+        assert!(notice.3.starts_with("auth-required:"));
 
         let event = Event::create(
             &key_pair,
@@ -850,7 +923,7 @@ mod tests {
             .await?;
         let notice: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
         assert!(!notice.2);
-        assert!(notice.3.contains("author"));
+        assert!(notice.3.starts_with("restricted:"));
 
         let event = Event::create(
             &key_pair,
