@@ -242,15 +242,17 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
             Err(err) => {
                 match err {
                     ws::ProtocolError::Overflow => {
+                        self.cont = None;
                         ctx.text(OutgoingMessage::notice("payload reached size limit."));
+                        ctx.close(Some(ws::CloseCode::Size.into()));
                     }
                     _ => {
                         debug!("Session error {} {} {:?}", self.id, self.ip, err);
-                        counter!("nostr_relay_session_stop_total", "reason" => "message error")
-                            .increment(1);
-                        ctx.stop();
                     }
                 }
+                counter!("nostr_relay_session_stop_total", "reason" => "message error")
+                    .increment(1);
+                ctx.stop();
                 return;
             }
             Ok(msg) => msg,
@@ -277,30 +279,53 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
             ws::Message::Binary(_) => {
                 ctx.text(OutgoingMessage::notice("Not support binary message"));
             }
-            ws::Message::Continuation(cont) => match cont {
-                Item::FirstText(buf) => {
-                    let mut bytes = BytesMut::new();
-                    bytes.extend_from_slice(&buf);
-                    self.cont = Some(bytes);
-                }
-                Item::FirstBinary(_) => {
-                    ctx.text(OutgoingMessage::notice("Not support binary message"));
-                }
-                Item::Continue(buf) => {
-                    if let Some(bytes) = &mut self.cont {
-                        bytes.extend_from_slice(&buf);
+            ws::Message::Continuation(cont) => {
+                let (buf, last) = match cont {
+                    Item::FirstText(buf) => {
+                        self.cont = Some(BytesMut::new());
+                        (buf, false)
                     }
+                    Item::FirstBinary(_) => {
+                        self.cont = None;
+                        ctx.text(OutgoingMessage::notice("Not support binary message"));
+                        return;
+                    }
+                    Item::Continue(buf) => (buf, false),
+                    Item::Last(buf) => (buf, true),
+                };
+                let Some(mut bytes) = self.cont.take() else {
+                    return;
+                };
+                let limit = self.app.setting.read().limitation.max_message_length;
+                if !bytes
+                    .len()
+                    .checked_add(buf.len())
+                    .is_some_and(|len| len <= limit)
+                {
+                    ctx.text(OutgoingMessage::notice("payload reached size limit."));
+                    return;
                 }
-                Item::Last(buf) => {
-                    if let Some(mut bytes) = self.cont.take() {
-                        bytes.extend_from_slice(&buf);
-                        if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                bytes.extend_from_slice(&buf);
+                if last {
+                    match String::from_utf8(Vec::from(bytes)) {
+                        Ok(text) => {
                             debug!("Session text {} {} {}", self.id, self.ip, text);
                             self.handle_message(text, ctx);
                         }
+                        Err(_) => {
+                            ctx.text(OutgoingMessage::notice(
+                                "invalid UTF-8 in fragmented text message.",
+                            ));
+                            ctx.close(Some(ws::CloseCode::Invalid.into()));
+                            counter!("nostr_relay_session_stop_total", "reason" => "message error")
+                                .increment(1);
+                            ctx.stop();
+                        }
                     }
+                } else {
+                    self.cont = Some(bytes);
                 }
-            },
+            }
             ws::Message::Nop => (),
         }
     }
@@ -310,7 +335,8 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Session {
 mod tests {
     use super::*;
     use crate::{create_test_app, Extension, ExtensionMessageResult};
-    use actix_rt::time::sleep;
+    use actix_http::ws::{OpCode, Parser};
+    use actix_rt::time::{sleep, timeout};
     use actix_web_actors::ws;
     use anyhow::Result;
     use bytes::Bytes;
@@ -451,6 +477,304 @@ mod tests {
                 br#"["NOTICE","payload reached size limit."]"#
             ))
         );
+        let close = timeout(Duration::from_secs(5), framed.next())
+            .await?
+            .unwrap()?;
+        assert_eq!(close, ws::Frame::Close(Some(ws::CloseCode::Size.into())));
+        Ok(())
+    }
+
+    async fn assert_websocket_rejected(
+        input: Bytes,
+        notice: &str,
+        close: ws::CloseCode,
+    ) -> Result<()> {
+        let app = create_test_app("websocket_rejection")?.add_extension(Echo)?;
+        app.setting.write().limitation.max_message_length = 32;
+        let session = Session::new("127.0.0.1".into(), web::Data::new(app));
+        let input = futures_util::stream::iter([Ok::<_, actix_web::error::PayloadError>(input)])
+            .chain(futures_util::stream::pending());
+        let output = ws::WebsocketContext::with_codec(
+            session,
+            input,
+            actix_http::ws::Codec::new().max_size(32),
+        );
+        futures_util::pin_mut!(output);
+        let chunk = timeout(Duration::from_secs(5), output.next())
+            .await?
+            .unwrap()
+            .expect("the WebSocket context must emit a valid response");
+        let mut bytes = BytesMut::from(chunk.as_ref());
+        let mut replies = Vec::new();
+        while let Some((finished, opcode, payload)) = Parser::parse(&mut bytes, false, 1024)? {
+            assert!(finished);
+            replies.push((opcode, payload.unwrap_or_default().freeze()));
+        }
+        assert!(bytes.is_empty());
+        assert_eq!(
+            replies,
+            [
+                (OpCode::Text, Bytes::copy_from_slice(notice.as_bytes())),
+                (
+                    OpCode::Close,
+                    Bytes::copy_from_slice(&u16::from(close).to_be_bytes()),
+                ),
+            ]
+        );
+        assert!(timeout(Duration::from_secs(5), output.next())
+            .await?
+            .is_none());
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn decoder_overflow_closes() -> Result<()> {
+        let mut input = BytesMut::from(&[0x81, 0xff][..]);
+        input.extend_from_slice(&(1u64 << 63).to_be_bytes());
+        input.extend_from_slice(&[0; 4]);
+        assert_websocket_rejected(
+            input.freeze(),
+            r#"["NOTICE","payload reached size limit."]"#,
+            ws::CloseCode::Size,
+        )
+        .await
+    }
+
+    #[actix_rt::test]
+    async fn continuation_frame_overflow_closes() -> Result<()> {
+        let text = br#"["REQ","1",{}]"#;
+        for position in 0..3 {
+            let mut input = BytesMut::new();
+            if position > 0 {
+                Parser::write_message(&mut input, text, OpCode::Text, false, true);
+            }
+            Parser::write_message(
+                &mut input,
+                [b' '; 33],
+                if position == 0 {
+                    OpCode::Text
+                } else {
+                    OpCode::Continue
+                },
+                position == 2,
+                true,
+            );
+            if position < 2 {
+                Parser::write_message(&mut input, [], OpCode::Continue, true, true);
+            }
+            Parser::write_message(&mut input, text, OpCode::Text, true, true);
+            assert_websocket_rejected(
+                input.freeze(),
+                r#"["NOTICE","payload reached size limit."]"#,
+                ws::CloseCode::Size,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn continuation_invalid_utf8_closes() -> Result<()> {
+        let mut input = BytesMut::new();
+        Parser::write_message(&mut input, b"[", OpCode::Text, false, true);
+        Parser::write_message(&mut input, b"\xff", OpCode::Continue, true, true);
+        Parser::write_message(&mut input, br#"["REQ","1",{}]"#, OpCode::Text, true, true);
+        assert_websocket_rejected(
+            input.freeze(),
+            r#"["NOTICE","invalid UTF-8 in fragmented text message."]"#,
+            ws::CloseCode::Invalid,
+        )
+        .await
+    }
+
+    async fn continuation_replies(
+        scenario: impl FnOnce(&mut Session, &mut ws::WebsocketContext<Session>) + 'static,
+    ) -> Result<Vec<Bytes>> {
+        let app = create_test_app("continuation_limits")?;
+        app.setting.write().limitation.max_message_length = 32;
+        let app = web::Data::new(app.add_extension(Echo)?);
+        let output = ws::WebsocketContext::with_factory(
+            futures_util::stream::pending::<Result<Bytes, actix_web::error::PayloadError>>(),
+            move |ctx| {
+                let mut session = Session::new("127.0.0.1".into(), app);
+                scenario(&mut session, ctx);
+                session
+            },
+        );
+        futures_util::pin_mut!(output);
+        let chunk = timeout(Duration::from_secs(5), output.next())
+            .await?
+            .unwrap()
+            .expect("the WebSocket context must emit a valid response");
+        let mut bytes = BytesMut::from(chunk.as_ref());
+        let mut replies = Vec::new();
+        while let Some((finished, opcode, payload)) =
+            actix_http::ws::Parser::parse(&mut bytes, false, 1024)?
+        {
+            assert!(finished);
+            assert_eq!(opcode, actix_http::ws::OpCode::Text);
+            replies.push(payload.unwrap().freeze());
+        }
+        assert!(bytes.is_empty());
+        Ok(replies)
+    }
+
+    #[actix_rt::test]
+    async fn continuation_buffer_size_limit() -> Result<()> {
+        let text = br#"["REQ","1",{}]"#;
+        let replies = continuation_replies(move |session, ctx| {
+            for fragment in [
+                Item::FirstText(Bytes::from_static(text)),
+                Item::Continue(Bytes::from_static(b"        ")),
+                Item::Continue(Bytes::from_static(b"        ")),
+                Item::Continue(Bytes::from_static(b"        ")),
+            ] {
+                StreamHandler::handle(session, Ok(Message::Continuation(fragment)), ctx);
+            }
+            assert!(
+                session.cont.is_none(),
+                "an oversized message must release its buffer"
+            );
+            for fragment in [
+                Item::Continue(Bytes::from_static(text)),
+                Item::Last(Bytes::from_static(b"        ")),
+                Item::FirstText(Bytes::from_static(&text[..2])),
+                Item::Last(Bytes::from_static(&text[2..])),
+            ] {
+                StreamHandler::handle(session, Ok(Message::Continuation(fragment)), ctx);
+            }
+        })
+        .await?;
+        assert_eq!(
+            replies,
+            [
+                Bytes::from_static(br#"["NOTICE","payload reached size limit."]"#),
+                Bytes::from_static(text),
+            ]
+        );
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn continuation_boundaries_and_utf8() -> Result<()> {
+        let text = br#"["REQ","1",{}]"#;
+        let unicode = r#"["REQ","é",{}]"#.as_bytes();
+        let split = unicode.iter().position(|byte| *byte == 0xc3).unwrap() + 1;
+        let replies = continuation_replies(move |session, ctx| {
+            for fragment in [
+                Item::FirstText(Bytes::from_static(text)),
+                Item::Continue(Bytes::from_static(b"        ")),
+                Item::Last(Bytes::from_static(b"          ")),
+                Item::FirstText(Bytes::from_static(text)),
+                Item::Last(Bytes::from_static(b"                   ")),
+                Item::FirstText(Bytes::copy_from_slice(&unicode[..split])),
+                Item::Last(Bytes::copy_from_slice(&unicode[split..])),
+            ] {
+                StreamHandler::handle(session, Ok(Message::Continuation(fragment)), ctx);
+            }
+            assert!(session.cont.is_none());
+            StreamHandler::handle(
+                session,
+                Ok(Message::Text(std::str::from_utf8(text).unwrap().into())),
+                ctx,
+            );
+        })
+        .await?;
+        assert_eq!(
+            replies,
+            [
+                Bytes::from(format!("{}{}", std::str::from_utf8(text)?, " ".repeat(18))),
+                Bytes::from_static(br#"["NOTICE","payload reached size limit."]"#),
+                Bytes::from_static(unicode),
+                Bytes::from_static(text),
+            ]
+        );
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn continuation_uses_current_size_limit() -> Result<()> {
+        let text = br#"["REQ","1",{}]"#;
+        let replies = continuation_replies(move |session, ctx| {
+            for (limit, fragment) in [
+                (32, Item::FirstText(Bytes::from_static(text))),
+                (8, Item::Continue(Bytes::new())),
+                (8, Item::Last(Bytes::new())),
+                (32, Item::FirstText(Bytes::from_static(text))),
+                (8, Item::Last(Bytes::new())),
+                (8, Item::FirstText(Bytes::from_static(text))),
+                (8, Item::Last(Bytes::new())),
+                (64, Item::FirstText(Bytes::from_static(text))),
+                (64, Item::Last(Bytes::from_static(b"                   "))),
+            ] {
+                session.app.setting.write().limitation.max_message_length = limit;
+                StreamHandler::handle(session, Ok(Message::Continuation(fragment)), ctx);
+                if let Some(bytes) = &session.cont {
+                    assert!(bytes.len() <= limit);
+                }
+            }
+        })
+        .await?;
+        assert_eq!(
+            replies,
+            [
+                Bytes::from_static(br#"["NOTICE","payload reached size limit."]"#),
+                Bytes::from_static(br#"["NOTICE","payload reached size limit."]"#),
+                Bytes::from_static(br#"["NOTICE","payload reached size limit."]"#),
+                Bytes::from(format!("{}{}", std::str::from_utf8(text)?, " ".repeat(19))),
+            ]
+        );
+        Ok(())
+    }
+
+    #[actix_rt::test]
+    async fn continuation_size_limit() -> Result<()> {
+        let text = br#"["REQ","1",{}]"#;
+        let mut srv = actix_test::start(|| {
+            let data = create_test_app("continuation_size_limit").unwrap();
+            data.setting.write().limitation.max_message_length = 32;
+            data.add_extension(Echo).unwrap().web_app()
+        });
+        let mut framed = srv.ws_at("/").await.unwrap();
+        framed
+            .send(ws::Message::Continuation(Item::FirstText(
+                Bytes::from_static(text),
+            )))
+            .await?;
+        for _ in 0..3 {
+            framed
+                .send(ws::Message::Continuation(Item::Continue(
+                    Bytes::from_static(b"        "),
+                )))
+                .await?;
+        }
+        let notice = timeout(Duration::from_secs(5), framed.next())
+            .await
+            .expect("the total size limit must be enforced before the final fragment")
+            .unwrap()?;
+        assert_eq!(
+            notice,
+            ws::Frame::Text(Bytes::from_static(
+                br#"["NOTICE","payload reached size limit."]"#
+            ))
+        );
+        for fragment in [
+            Item::Continue(Bytes::from_static(text)),
+            Item::Continue(Bytes::from_static(b"        ")),
+            Item::Last(Bytes::from_static(b"        ")),
+        ] {
+            framed.send(ws::Message::Continuation(fragment)).await?;
+        }
+        for fragment in [
+            Item::FirstText(Bytes::from_static(&text[..2])),
+            Item::Last(Bytes::from_static(&text[2..])),
+        ] {
+            framed.send(ws::Message::Continuation(fragment)).await?;
+        }
+        let reply = timeout(Duration::from_secs(5), framed.next())
+            .await?
+            .unwrap()?;
+        assert_eq!(reply, ws::Frame::Text(Bytes::from_static(text)));
         Ok(())
     }
 
