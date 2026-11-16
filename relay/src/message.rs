@@ -231,6 +231,14 @@ pub struct Subscription {
 pub struct OutgoingMessage(pub String);
 
 impl OutgoingMessage {
+    /// Checks only the command so malformed EVENT payloads still receive permission checks.
+    pub fn is_event(&self) -> bool {
+        self.0.starts_with("[\"EVENT\",")
+            || self.0.trim_start().strip_prefix('[').is_some_and(|rest| {
+                String::deserialize(&mut serde_json::Deserializer::from_str(rest))
+                    .is_ok_and(|command| command == "EVENT")
+            })
+    }
     pub fn notice(message: &str) -> Self {
         Self(json!(["NOTICE", message]).to_string())
     }
@@ -240,11 +248,11 @@ impl OutgoingMessage {
     }
 
     pub fn eose(sub_id: &str) -> Self {
-        Self(format!(r#"["EOSE","{}"]"#, sub_id))
+        Self(json!(["EOSE", sub_id]).to_string())
     }
 
     pub fn event(sub_id: &str, event: &str) -> Self {
-        Self(format!(r#"["EVENT","{}",{}]"#, sub_id, event))
+        Self(format!(r#"["EVENT",{},{}]"#, json!(sub_id), event))
     }
 
     pub fn ok(event_id: &str, saved: bool, message: &str) -> Self {
@@ -400,6 +408,35 @@ mod tests {
     }
 
     #[test]
+    fn is_event_accepts_equivalent_json_encodings() {
+        for wire in [
+            r#"["EVENT","sub",{}]"#,
+            " \n[ \"EVENT\" , \"sub\", {} ]",
+            r#"["\u0045VENT", "sub", {}]"#,
+            r#"["EVENT""#,
+            r#"["EVENT",]"#,
+            r#"["EVENT","sub",{"broken":}]"#,
+            r#"["EVENT","sub",{}] trailing"#,
+            r#" [ "\u0045VENT", "x"", {"content":"secret"}]"#,
+        ] {
+            assert!(OutgoingMessage(wire.into()).is_event(), "{wire}");
+        }
+        let nested = "[".repeat(150) + "0" + &"]".repeat(150);
+        assert!(OutgoingMessage(format!("[ \"EVENT\", \"sub\", {nested} ]")).is_event());
+        for wire in [
+            r#"["NOTICE","EVENT"]"#,
+            r#"["EVENTUAL"]"#,
+            "not JSON",
+            "[]",
+            r#"{"command":"EVENT"}"#,
+            "[1]",
+            r#"["EV\qENT","sub",{}]"#,
+        ] {
+            assert!(!OutgoingMessage(wire.into()).is_event(), "{wire}");
+        }
+    }
+
+    #[test]
     fn se_outgoing_message() -> Result<()> {
         let msg = OutgoingMessage::notice("hello");
         let json = msg.to_string();
@@ -414,6 +451,19 @@ mod tests {
         let msg = OutgoingMessage::closed("1", "hello");
         let json = msg.to_string();
         assert_eq!(json, r#"["CLOSED","1","hello"]"#);
+
+        for id in ["x\"", "x\\", "x\n\t", "☃"] {
+            let event = OutgoingMessage::event(id, r#"{"content":"hello"}"#);
+            assert!(event.is_event());
+            assert_eq!(
+                serde_json::from_str::<Value>(&event.0)?,
+                json!(["EVENT", id, {"content": "hello"}])
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(&OutgoingMessage::eose(id).0)?,
+                json!(["EOSE", id])
+            );
+        }
 
         Ok(())
     }

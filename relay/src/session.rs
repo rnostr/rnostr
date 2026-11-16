@@ -169,12 +169,20 @@ impl Session {
     }
 }
 
-/// Handle messages from server, we simply send it to peer websocket
+/// Run outgoing hooks before forwarding server messages to the websocket.
 impl Handler<OutgoingMessage> for Session {
     type Result = ();
 
     fn handle(&mut self, msg: OutgoingMessage, ctx: &mut Self::Context) {
-        ctx.text(msg);
+        if self
+            .app
+            .clone()
+            .extensions
+            .read()
+            .call_outgoing(&msg, self, ctx)
+        {
+            ctx.text(msg);
+        }
     }
 }
 
@@ -402,6 +410,51 @@ mod tests {
         fn name(&self) -> &'static str {
             "Echo"
         }
+    }
+
+    struct OutgoingFilter;
+    impl Extension for OutgoingFilter {
+        fn name(&self) -> &'static str {
+            "outgoing_filter"
+        }
+
+        fn outgoing(
+            &self,
+            msg: &OutgoingMessage,
+            _session: &mut Session,
+            _ctx: &mut <Session as Actor>::Context,
+        ) -> bool {
+            msg.0 != r#"["NOTICE","blocked"]"#
+        }
+    }
+
+    #[actix_rt::test]
+    async fn outgoing_hook_filters_mailbox_messages() -> Result<()> {
+        let app = web::Data::new(
+            create_test_app("outgoing-hook")?
+                .add_extension(Echo)?
+                .add_extension(OutgoingFilter)?,
+        );
+        let (addr, output) = ws::WebsocketContext::create_with_addr(
+            Session::new("127.0.0.1".into(), app),
+            futures_util::stream::pending::<Result<Bytes, actix_web::error::PayloadError>>(),
+        );
+        let blocked = OutgoingMessage::notice("blocked");
+        let allowed = OutgoingMessage::notice("allowed");
+        addr.do_send(blocked.clone());
+        addr.do_send(allowed.clone());
+        let mut output = Box::pin(output);
+        let bytes = actix_rt::time::timeout(Duration::from_secs(10), output.next())
+            .await?
+            .expect("session output")
+            .expect("websocket frame");
+        assert!(bytes
+            .windows(allowed.0.len())
+            .any(|part| part == allowed.0.as_bytes()));
+        assert!(!bytes
+            .windows(blocked.0.len())
+            .any(|part| part == blocked.0.as_bytes()));
+        Ok(())
     }
 
     #[actix_rt::test]

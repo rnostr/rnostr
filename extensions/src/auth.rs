@@ -1,3 +1,5 @@
+use actix::ActorContext;
+use actix_http::ws::{CloseCode, CloseReason};
 use metrics::{counter, describe_counter};
 use nostr_relay::db::now;
 use nostr_relay::{
@@ -5,6 +7,7 @@ use nostr_relay::{
     Extension, ExtensionMessageResult, List, Result, Session, Setting, SettingUpdate,
 };
 use serde::Deserialize;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Deserialize, Default, Debug)]
@@ -48,6 +51,10 @@ pub struct AuthSetting {
 pub struct Auth {
     setting: AuthSetting,
 }
+
+// Suppress queued replies for closed subscriptions until a new REQ reuses their IDs.
+#[derive(Clone, Default)]
+struct ClosedSubscriptions(HashSet<String>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Denial {
@@ -114,6 +121,32 @@ impl Auth {
     ) -> Result<(), &'static str> {
         Self::check_permission(permission, pubkey, event_pubkey, event_tags, ip)
             .map_err(Denial::reason)
+    }
+
+    fn check_read_permission(&self, session: &Session) -> Result<(), Denial> {
+        if !self.setting.enabled {
+            return Ok(());
+        }
+        let key = session.get::<AuthState>().and_then(AuthState::pubkey);
+        let result =
+            Self::check_permission(self.setting.req.as_ref(), key, None, None, session.ip());
+        if let Err(denial) = result {
+            counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => denial.reason()).increment(1);
+        }
+        result
+    }
+
+    fn subscription_id(msg: &OutgoingMessage) -> Option<String> {
+        let rest = msg.0.trim_start().strip_prefix('[')?;
+        let mut command = serde_json::Deserializer::from_str(rest).into_iter::<String>();
+        if !matches!(command.next()?.ok()?.as_str(), "EVENT" | "EOSE" | "CLOSED") {
+            return None;
+        }
+        let rest = rest
+            .get(command.byte_offset()..)?
+            .trim_start()
+            .strip_prefix(',')?;
+        String::deserialize(&mut serde_json::Deserializer::from_str(rest)).ok()
     }
 
     fn check_permission(
@@ -199,6 +232,58 @@ impl Extension for Auth {
                 .is_some_and(Permission::restricts_writes);
         setting.set_restricted_writes(self.name(), restricted_writes);
         Ok(Box::new(move || self.setting = parsed))
+    }
+
+    fn outgoing(
+        &self,
+        msg: &OutgoingMessage,
+        session: &mut Session,
+        ctx: &mut <Session as actix::Actor>::Context,
+    ) -> bool {
+        let closed = session
+            .get::<ClosedSubscriptions>()
+            .filter(|closed| !closed.0.is_empty());
+        if !((self.setting.enabled && self.setting.req.is_some()) || closed.is_some()) {
+            return true;
+        }
+        if closed.is_some_and(|closed| {
+            Self::subscription_id(msg).is_some_and(|id| closed.0.contains(&id))
+        }) {
+            return false;
+        }
+        if !msg.is_event() {
+            return true;
+        }
+        if let Err(denial) = self.check_read_permission(session) {
+            if denial == Denial::AuthenticationRequired {
+                if let Some(id) = Self::subscription_id(msg) {
+                    let mut closed = session
+                        .get::<ClosedSubscriptions>()
+                        .cloned()
+                        .unwrap_or_default();
+                    closed.0.insert(id.clone());
+                    session.set(closed);
+                    if session.get::<AuthState>().is_none() {
+                        self.connected(session, ctx);
+                    }
+                    ctx.text(OutgoingMessage::closed(&id, &denial.to_string()));
+                    session.app.server.do_send(ClientMessage::new(
+                        session.id(),
+                        String::new(),
+                        IncomingMessage::Close(id),
+                    ));
+                    return false;
+                }
+            }
+            let reason = denial.reason();
+            ctx.close(Some(CloseReason {
+                code: CloseCode::Policy,
+                description: Some(reason.into()),
+            }));
+            ctx.stop();
+            return false;
+        }
+        true
     }
 
     fn connected(&self, session: &mut Session, ctx: &mut <Session as actix::Actor>::Context) {
@@ -290,18 +375,21 @@ impl Extension for Auth {
                     }
                 }
                 IncomingMessage::Req(sub) | IncomingMessage::Count(sub) => {
-                    if let Err(err) = Self::check_permission(
-                        self.setting.req.as_ref(),
-                        state.and_then(|s| s.pubkey()),
-                        None,
-                        None,
-                        session.ip(),
-                    ) {
-                        counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => err.reason()).increment(1);
+                    if let Err(err) = self.check_read_permission(session) {
                         return OutgoingMessage::closed(&sub.id, &err.to_string()).into();
                     }
                 }
                 _ => {}
+            }
+        }
+        if let IncomingMessage::Req(sub) = &msg.msg {
+            if let Some(closed) = session
+                .get::<ClosedSubscriptions>()
+                .filter(|closed| closed.0.contains(&sub.id))
+            {
+                let mut closed = closed.clone();
+                closed.0.remove(&sub.id);
+                session.set(closed);
             }
         }
         ExtensionMessageResult::Continue(msg)

@@ -54,6 +54,10 @@ Provide metrics url for [prometheus](https://prometheus.io/) scrape
 
 [NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) Authentication, ip, auth pubkey and event pubkey whitelist blacklist
 
+Read permission changes apply to open subscriptions on their next event delivery.
+Blocked connections close with WebSocket policy code 1008. Clients needing
+authentication receive `CLOSED auth-required:` and can authenticate and resubscribe.
+
 #### Rate limiter
 
 Limit event write frequency.
