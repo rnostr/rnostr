@@ -16,6 +16,10 @@ See [demo](./examples/demo.rs)
 
 See [extensions demo](../extensions/examples/demo.rs)
 
+Claim application-specific tables with `app.extensions.write().claim_section("my_app")`.
+Web setup finishes registration automatically; headless embedders call
+`app.finish_registration()` after registering extensions and claiming their tables.
+
 Environment overrides reach extension settings as text, exactly as set. String
 fields need nothing. Boolean and numeric fields need
 `#[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]` to

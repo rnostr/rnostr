@@ -4,6 +4,8 @@ use crate::{
     Result, Session, Setting,
 };
 use actix_web::web::ServiceConfig;
+use std::collections::BTreeSet;
+use tracing::warn;
 
 pub enum ExtensionMessageResult {
     /// Continue run the next extension message method, the server takes over finally.
@@ -62,11 +64,20 @@ pub trait Extension: Send + Sync {
 #[derive(Default)]
 pub struct Extensions {
     list: Vec<Box<dyn Extension>>,
+    claimed_sections: BTreeSet<String>,
+    warned_sections: Option<BTreeSet<String>>,
 }
 
 impl Extensions {
     pub fn add<E: Extension + 'static>(&mut self, ext: E) {
+        self.claim_section(ext.name());
         self.list.push(Box::new(ext));
+    }
+
+    /// Mark a configuration section as used by the embedding application.
+    /// Claim before finishing registration or creating a web app to avoid an initial warning.
+    pub fn claim_section(&mut self, name: impl Into<String>) {
+        self.claimed_sections.insert(name.into());
     }
 
     pub fn call_setting(&mut self, setting: &SettingWrapper, mut candidate: Setting) -> Result<()> {
@@ -79,7 +90,31 @@ impl Extensions {
         for update in updates {
             update();
         }
+        self.warn_unused_sections(&setting.read());
         Ok(())
+    }
+
+    pub(crate) fn finish_registration(&mut self, setting: &Setting) {
+        if self.warned_sections.is_none() {
+            self.warned_sections = Some(BTreeSet::new());
+            self.warn_unused_sections(setting);
+        }
+    }
+
+    fn warn_unused_sections(&mut self, setting: &Setting) {
+        let Some(warned) = &mut self.warned_sections else {
+            return;
+        };
+        let sections: BTreeSet<_> = setting
+            .extra
+            .iter()
+            .filter(|(name, value)| value.is_object() && !self.claimed_sections.contains(*name))
+            .map(|(name, _)| name.clone())
+            .collect();
+        for section in sections.difference(warned) {
+            warn!(section, "configuration section has no registered extension");
+        }
+        *warned = sections;
     }
 
     pub fn call_config_web(&mut self, cfg: &mut ServiceConfig) {
@@ -195,6 +230,92 @@ mod config_tests {
                 }
             }))
         }
+    }
+
+    #[actix_rt::test]
+    async fn unused_sections_warn_after_registration_and_successful_reloads() -> anyhow::Result<()>
+    {
+        for headless in [false, true] {
+            let log = tempfile::NamedTempFile::new()?;
+            let warnings = || -> anyhow::Result<Vec<String>> {
+                Ok(fs::read_to_string(log.path())?
+                    .lines()
+                    .filter(|line| {
+                        line.contains("configuration section has no registered extension")
+                    })
+                    .map(str::to_owned)
+                    .collect())
+            };
+            let subscriber = tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_max_level(tracing::Level::WARN)
+                .with_writer(std::sync::Mutex::new(log.reopen()?))
+                .finish();
+            tracing::subscriber::with_default(subscriber, || -> anyhow::Result<()> {
+                tracing::warn!("unrelated warning");
+                let app = crate::create_test_app("unused-sections")?;
+                app.setting.write().extra = serde_json::from_value(json!({
+                    "policy": {"value": 1}, "late": {}, "ratelimiter": {},
+                    "my_app": {"value": 17}, "log": "info", "base": "base"
+                }))?;
+                let app = app.add_extension(Probe::new("policy", Arc::new(AtomicUsize::new(0))))?;
+                let config = tempfile::Builder::new().suffix(".toml").tempfile()?;
+                fs::write(
+                    config.path(),
+                    "log = 'info'\nbase = 'base'\n[policy]\nvalue = 1\n[late]\n[ratelimiter]\n[my_app]\nvalue = 17\n",
+                )?;
+                app.reload(config.path())?;
+                assert!(warnings()?.is_empty());
+                assert_eq!(
+                    app.setting
+                        .read()
+                        .parse_extension::<Policy>("my_app")?
+                        .value,
+                    17
+                );
+                app.extensions.write().claim_section("my_app");
+                let app = actix_web::web::Data::new(
+                    app.add_extension(Probe::new("late", Arc::new(AtomicUsize::new(0))))?,
+                );
+                if headless {
+                    app.finish_registration();
+                    app.finish_registration();
+                } else {
+                    for _ in 0..2 {
+                        drop(crate::create_web_app(app.clone()));
+                    }
+                }
+                assert_eq!(warnings()?.len(), 1);
+                fs::write(config.path(), "[policy]\nvalue = 'bad'\n[later]\n")?;
+                assert!(app.reload(config.path()).is_err());
+                assert!(!warnings()?.iter().any(|line| line.contains("later")));
+                let valid = "log = 'info'\nbase = 'base'\n[policy]\nvalue = 2\n[ratelimiter]\n[later]\n[my_app]\nvalue = 17\n";
+                fs::write(config.path(), valid)?;
+                app.reload(config.path())?;
+                app.reload(config.path())?;
+                fs::write(config.path(), valid.replace("[ratelimiter]\n", ""))?;
+                app.reload(config.path())?;
+                assert_eq!(warnings()?.len(), 2);
+                fs::write(config.path(), valid)?;
+                app.reload(config.path())?;
+                Ok(())
+            })?;
+            assert!(fs::read_to_string(log.path())?.contains("unrelated warning"));
+            let warnings = warnings()?;
+            assert_eq!(warnings.len(), 3, "{warnings:?}");
+            for (section, expected) in [("ratelimiter", 2), ("later", 1)] {
+                assert_eq!(
+                    warnings
+                        .iter()
+                        .filter(|line| line.contains(section))
+                        .count(),
+                    expected,
+                    "{warnings:?}"
+                );
+            }
+        }
+        Ok(())
     }
 
     #[actix_rt::test]

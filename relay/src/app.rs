@@ -190,6 +190,13 @@ impl App {
             .call_setting(&self.setting, candidate)
     }
 
+    /// Enable unused-section warnings after extensions and custom sections are registered.
+    pub fn finish_registration(&self) {
+        self.extensions
+            .write()
+            .finish_registration(&self.setting.read());
+    }
+
     pub fn web_app(
         self,
     ) -> WebApp<
@@ -205,6 +212,7 @@ impl App {
     }
 
     pub fn web_server(self) -> Result<actix_web::dev::Server, std::io::Error> {
+        self.finish_registration();
         let r = self.setting.read();
         let num = if r.thread.http == 0 {
             num_cpus::get()
@@ -236,9 +244,11 @@ pub fn create_web_app(
 > {
     let app = WebApp::new();
     let extensions = data.extensions.clone();
+    let mut extensions = extensions.write();
+    extensions.finish_registration(&data.setting.read());
     app.app_data(data)
         .configure(|cfg| {
-            extensions.write().call_config_web(cfg);
+            extensions.call_config_web(cfg);
         })
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(
