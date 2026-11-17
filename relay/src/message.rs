@@ -240,11 +240,11 @@ impl OutgoingMessage {
     }
 
     pub fn eose(sub_id: &str) -> Self {
-        Self(format!(r#"["EOSE","{}"]"#, sub_id))
+        Self(json!(["EOSE", sub_id]).to_string())
     }
 
     pub fn event(sub_id: &str, event: &str) -> Self {
-        Self(format!(r#"["EVENT","{}",{}]"#, sub_id, event))
+        Self(format!(r#"["EVENT",{},{}]"#, json!(sub_id), event))
     }
 
     pub fn ok(event_id: &str, saved: bool, message: &str) -> Self {
@@ -415,6 +415,26 @@ mod tests {
         let json = msg.to_string();
         assert_eq!(json, r#"["CLOSED","1","hello"]"#);
 
+        Ok(())
+    }
+
+    #[test]
+    fn outgoing_escapes_subscription_ids() -> Result<()> {
+        let event = r#"{ "id": "1", "content": "hello" }"#;
+        for sub_id in ["plain", "", "quote\"slash\\\n\r\t\0é", "id\",\"injected"] {
+            for (msg, expected) in [
+                (OutgoingMessage::eose(sub_id), json!(["EOSE", sub_id])),
+                (
+                    OutgoingMessage::event(sub_id, event),
+                    json!(["EVENT", sub_id, {"id": "1", "content": "hello"}]),
+                ),
+            ] {
+                assert_eq!(serde_json::from_str::<Value>(&msg.0)?, expected);
+            }
+            assert!(OutgoingMessage::event(sub_id, event)
+                .0
+                .ends_with(&format!(",{event}]")));
+        }
         Ok(())
     }
 

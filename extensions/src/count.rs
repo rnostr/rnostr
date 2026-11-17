@@ -68,10 +68,9 @@ impl Extension for Count {
                     let timeout = session.app.setting.read().data.db_query_timeout;
                     match self.count(&sub.filters[0], timeout) {
                         Ok(size) => {
-                            return ExtensionMessageResult::Stop(OutgoingMessage(format!(
-                                r#"["COUNT","{}",{{"count": {}}}]"#,
-                                sub.id, size
-                            )))
+                            return ExtensionMessageResult::Stop(OutgoingMessage(
+                                serde_json::json!(["COUNT", sub.id, {"count": size}]).to_string(),
+                            ))
                         }
                         Err(err) => {
                             return ExtensionMessageResult::Stop(OutgoingMessage::closed(
@@ -116,6 +115,33 @@ mod tests {
     #[derive(Deserialize, Default, Debug)]
     struct CountResult {
         pub count: u64,
+    }
+
+    #[actix_rt::test]
+    async fn count_escapes_subscription_ids() -> Result<()> {
+        let app = web::Data::new(create_test_app("count-escaping")?);
+        for sub_id in ["plain", "", "quote\"slash\\\n\r\t\0é", "id\",\"injected"] {
+            let mut count = Count::new(app.db.clone());
+            count.setting.enabled = true;
+            let text = serde_json::json!(["COUNT", sub_id, {}]).to_string();
+            let msg = ClientMessage::new(0, text.clone(), serde_json::from_str(&text)?);
+            let app = app.clone();
+            let _output = ws::WebsocketContext::with_factory(
+                futures_util::stream::pending::<Result<bytes::Bytes, actix_web::error::PayloadError>>(
+                ),
+                move |ctx| {
+                    let mut session = Session::new("127.0.0.1".into(), app);
+                    let ExtensionMessageResult::Stop(reply) = count.message(msg, &mut session, ctx)
+                    else {
+                        panic!("COUNT must produce a response");
+                    };
+                    let actual: serde_json::Value = serde_json::from_str(&reply.0).unwrap();
+                    assert_eq!(actual, serde_json::json!(["COUNT", sub_id, {"count": 0}]));
+                    session
+                },
+            );
+        }
+        Ok(())
     }
 
     #[actix_rt::test]
