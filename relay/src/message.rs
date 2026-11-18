@@ -469,6 +469,26 @@ mod tests {
     }
 
     #[test]
+    fn outgoing_escapes_subscription_ids() -> Result<()> {
+        let event = r#"{ "id": "1", "content": "hello" }"#;
+        for sub_id in ["plain", "", "quote\"slash\\\n\r\t\0é", "id\",\"injected"] {
+            for (msg, expected) in [
+                (OutgoingMessage::eose(sub_id), json!(["EOSE", sub_id])),
+                (
+                    OutgoingMessage::event(sub_id, event),
+                    json!(["EVENT", sub_id, {"id": "1", "content": "hello"}]),
+                ),
+            ] {
+                assert_eq!(serde_json::from_str::<Value>(&msg.0)?, expected);
+            }
+            assert!(OutgoingMessage::event(sub_id, event)
+                .0
+                .ends_with(&format!(",{event}]")));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn validate() -> Result<()> {
         let msg: IncomingMessage = serde_json::from_str(
             r#"["EVENT", {
