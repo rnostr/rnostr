@@ -48,6 +48,19 @@ pub trait Extension: Send + Sync {
     #[allow(unused_variables)]
     fn disconnected(&self, session: &mut Session, ctx: &mut <Session as actix::Actor>::Context) {}
 
+    /// Intercepts `OutgoingMessage`s received through the session mailbox; false suppresses delivery.
+    /// Hooks run in registration order until one returns false.
+    /// Direct `ctx.text()` replies, including `ExtensionMessageResult::Stop`, bypass this hook.
+    #[allow(unused_variables)]
+    fn outgoing(
+        &self,
+        msg: &OutgoingMessage,
+        session: &mut Session,
+        ctx: &mut <Session as actix::Actor>::Context,
+    ) -> bool {
+        true
+    }
+
     /// Execute when message incoming
     #[allow(unused_variables)]
     fn message(
@@ -141,6 +154,15 @@ impl Extensions {
         for ext in &self.list {
             ext.disconnected(session, ctx);
         }
+    }
+
+    pub fn call_outgoing(
+        &self,
+        msg: &OutgoingMessage,
+        session: &mut Session,
+        ctx: &mut <Session as actix::Actor>::Context,
+    ) -> bool {
+        self.list.iter().all(|ext| ext.outgoing(msg, session, ctx))
     }
 
     pub fn call_message(
