@@ -40,8 +40,10 @@ All extensions support configuration in the [config file](./rnostr.example.toml)
 
 Invalid configuration prevents startup; invalid reloads keep all previous
 settings. Unknown fields in core and registered extension tables are errors,
-even when disabled; unregistered sections remain allowed. Missing fields default,
-and read-only information fields `version` and `supported_nips` are ignored.
+even when disabled. Unregistered tables remain allowed; warnings identify them
+after registration and whenever a successful reload adds or restores one.
+Missing fields default; read-only information fields `version` and `supported_nips`
+are ignored.
 
 Heartbeat errors now reject startup or reload instead of falling back to defaults.
 The timeout must exceed the interval: `"2m"` needs a timeout such as `"4m"`.
