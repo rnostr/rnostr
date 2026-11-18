@@ -64,7 +64,9 @@ impl<'de> Visitor<'de> for RangeVisitor {
     where
         E: de::Error,
     {
-        Ok(Range(v, v + 1))
+        v.checked_add(1)
+            .map(|end| Range(v, end))
+            .ok_or_else(|| E::custom("kind is too large"))
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -309,6 +311,7 @@ mod tests {
         assert!(ranges[2].contains(39999));
         assert!(!ranges[2].contains(40000));
         assert_eq!(ranges, vec![Range(1, 2), Range(2, 3), Range(30000, 40000)]);
+        assert!(serde_json::from_str::<Vec<Range>>("[18446744073709551615]").is_err());
 
         let json = "[\"1\", 2, [30000, 40000]]";
         let ranges = serde_json::from_str::<Vec<Range>>(json);
