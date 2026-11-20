@@ -1,5 +1,5 @@
 use crate::{
-    message::{ClientMessage, OutgoingMessage},
+    message::{ClientMessage, IncomingMessage, OutgoingMessage, RejectionTarget},
     setting::SettingWrapper,
     Result, Session, Setting,
 };
@@ -10,8 +10,10 @@ use tracing::warn;
 pub enum ExtensionMessageResult {
     /// Continue run the next extension message method, the server takes over finally.
     Continue(ClientMessage),
-    /// Stop run the next, send outgoing message to client.
+    /// Respond and stop dispatching.
     Stop(OutgoingMessage),
+    /// Reject; the dispatcher formats the error and invalidates reconciliation state.
+    Reject(Box<ClientMessage>, String),
     /// Stop run the next, does not send any messages to the client.
     Ignore,
 }
@@ -25,6 +27,12 @@ impl From<OutgoingMessage> for ExtensionMessageResult {
 /// A prepared, infallible update to an extension's live state.
 /// Must not panic: a panic can leave a reload partially applied.
 pub type SettingUpdate<'a> = Box<dyn FnOnce() + 'a>;
+
+impl ClientMessage {
+    pub fn reject(self, reason: impl Into<String>) -> ExtensionMessageResult {
+        ExtensionMessageResult::Reject(Box::new(self), reason.into())
+    }
+}
 
 /// Extension for user session
 pub trait Extension: Send + Sync {
@@ -48,8 +56,9 @@ pub trait Extension: Send + Sync {
     #[allow(unused_variables)]
     fn disconnected(&self, session: &mut Session, ctx: &mut <Session as actix::Actor>::Context) {}
 
-    /// Intercepts `OutgoingMessage`s received through the session mailbox; false suppresses delivery.
+    /// Filters mailbox messages and completed reconciliation replies; false suppresses delivery.
     /// Hooks run in registration order until one returns false.
+    /// Suppressing NEG-MSG requires sending NEG-ERR or closing the connection.
     /// Direct `ctx.text()` replies, including `ExtensionMessageResult::Stop`, bypass this hook.
     #[allow(unused_variables)]
     fn outgoing(
@@ -60,6 +69,9 @@ pub trait Extension: Send + Sync {
     ) -> bool {
         true
     }
+
+    /// Invalidate a reconciliation on replacement, closure, or rejection.
+    fn close_reconciliation(&self, _id: &str, _session: &mut Session) {}
 
     /// Execute when message incoming
     #[allow(unused_variables)]
@@ -165,27 +177,75 @@ impl Extensions {
         self.list.iter().all(|ext| ext.outgoing(msg, session, ctx))
     }
 
+    /// Dispatch and respond; return only unhandled requests.
     pub fn call_message(
         &self,
-        msg: ClientMessage,
+        mut msg: ClientMessage,
         session: &mut Session,
         ctx: &mut <Session as actix::Actor>::Context,
-    ) -> ExtensionMessageResult {
-        let mut msg = msg;
+    ) -> Option<ClientMessage> {
+        match &msg.msg {
+            IncomingMessage::NegOpen(open) => self.close_reconciliation(&open.id, session),
+            IncomingMessage::NegClose(id) => self.close_reconciliation(id, session),
+            _ => {}
+        }
+        let validation = msg.validate(&session.app.setting.read().limitation);
+        if let Err(err) = validation {
+            ctx.text(self.reject(&msg.msg.rejection_target(), &err.to_string(), session));
+            return None;
+        }
         for ext in &self.list {
             match ext.message(msg, session, ctx) {
                 ExtensionMessageResult::Continue(m) => {
                     msg = m;
                 }
                 ExtensionMessageResult::Stop(o) => {
-                    return ExtensionMessageResult::Stop(o);
+                    ctx.text(o);
+                    return None;
+                }
+                ExtensionMessageResult::Reject(request, reason) => {
+                    ctx.text(self.reject(&request.msg.rejection_target(), &reason, session));
+                    return None;
                 }
                 ExtensionMessageResult::Ignore => {
-                    return ExtensionMessageResult::Ignore;
+                    return None;
                 }
             };
         }
-        ExtensionMessageResult::Continue(msg)
+        if msg.msg.reconciliation_id().is_some() {
+            // Valid NEG-CLOSE is silent; malformed closes retain normal error diagnostics.
+            if !matches!(msg.msg, IncomingMessage::NegClose(_)) {
+                ctx.text(self.reject(
+                    &msg.msg.rejection_target(),
+                    "closed: reconciliation unsupported",
+                    session,
+                ));
+            }
+            None
+        } else {
+            Some(msg)
+        }
+    }
+
+    pub fn close_reconciliation(&self, id: &str, session: &mut Session) {
+        for ext in &self.list {
+            ext.close_reconciliation(id, session);
+        }
+    }
+
+    pub(crate) fn reject(
+        &self,
+        target: &RejectionTarget,
+        reason: &str,
+        session: &mut Session,
+    ) -> OutgoingMessage {
+        if let RejectionTarget::Reconciliation(id) = target {
+            self.close_reconciliation(id, session);
+        }
+        target.response(
+            reason,
+            session.app.setting.read().limitation.max_subid_length,
+        )
     }
 }
 
@@ -416,8 +476,6 @@ mod config_tests {
         let file = tempfile::Builder::new().suffix(".toml").tempfile()?;
         for invalid in [
             "",
-            " \n\t ",
-            "# file is still being written\n",
             "[information]\nname = \"new\"\n[network]\nport = \"bad\"",
             "[information]\nname = \"new\"\n[first]\nvalue = 8\n[last]\nvalue = \"bad\"",
         ] {

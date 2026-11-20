@@ -63,6 +63,13 @@ async fn count_configuration_is_strict() -> Result<()> {
     common(&mut crate::Count::new(app.db))
 }
 
+#[cfg(feature = "negentropy")]
+#[actix_rt::test]
+async fn negentropy_configuration_is_strict() -> Result<()> {
+    let app = crate::create_test_app("config-negentropy")?;
+    common(&mut crate::Negentropies::new(app.db))
+}
+
 #[cfg(feature = "search")]
 #[test]
 fn search_configuration_is_strict() -> Result<()> {

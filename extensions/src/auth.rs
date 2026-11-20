@@ -3,7 +3,7 @@ use actix_http::ws::{CloseCode, CloseReason};
 use metrics::{counter, describe_counter};
 use nostr_relay::db::now;
 use nostr_relay::{
-    message::{ClientMessage, IncomingMessage, OutgoingMessage},
+    message::{ClientMessage, IncomingMessage, OutgoingMessage, NEG_MSG},
     Extension, ExtensionMessageResult, List, Result, Session, Setting, SettingUpdate,
 };
 use serde::Deserialize;
@@ -123,7 +123,7 @@ impl Auth {
             .map_err(Denial::reason)
     }
 
-    fn check_read_permission(&self, session: &Session) -> Result<(), Denial> {
+    fn check_read_permission(&self, session: &Session, command: &str) -> Result<(), Denial> {
         if !self.setting.enabled {
             return Ok(());
         }
@@ -131,15 +131,15 @@ impl Auth {
         let result =
             Self::check_permission(self.setting.req.as_ref(), key, None, None, session.ip());
         if let Err(denial) = result {
-            counter!("nostr_relay_auth_unauthorized", "command" => "REQ", "reason" => denial.reason()).increment(1);
+            counter!("nostr_relay_auth_unauthorized", "command" => command.to_owned(), "reason" => denial.reason()).increment(1);
         }
         result
     }
 
-    fn subscription_id(msg: &OutgoingMessage) -> Option<String> {
+    fn message_id(msg: &OutgoingMessage, commands: &[&str]) -> Option<String> {
         let rest = msg.0.trim_start().strip_prefix('[')?;
         let mut command = serde_json::Deserializer::from_str(rest).into_iter::<String>();
-        if !matches!(command.next()?.ok()?.as_str(), "EVENT" | "EOSE" | "CLOSED") {
+        if !commands.contains(&command.next()?.ok()?.as_str()) {
             return None;
         }
         let rest = rest
@@ -246,17 +246,25 @@ impl Extension for Auth {
         if !((self.setting.enabled && self.setting.req.is_some()) || closed.is_some()) {
             return true;
         }
+        if let Some(id) = Self::message_id(msg, &[NEG_MSG]) {
+            if let Err(denial) = self.check_read_permission(session, NEG_MSG) {
+                ctx.text(OutgoingMessage::neg_err(&id, &denial.to_string()));
+                return false;
+            }
+            return true;
+        }
         if closed.is_some_and(|closed| {
-            Self::subscription_id(msg).is_some_and(|id| closed.0.contains(&id))
+            Self::message_id(msg, &["EVENT", "EOSE", "CLOSED"])
+                .is_some_and(|id| closed.0.contains(&id))
         }) {
             return false;
         }
         if !msg.is_event() {
             return true;
         }
-        if let Err(denial) = self.check_read_permission(session) {
+        if let Err(denial) = self.check_read_permission(session, "REQ") {
             if denial == Denial::AuthenticationRequired {
-                if let Some(id) = Self::subscription_id(msg) {
+                if let Some(id) = Self::message_id(msg, &["EVENT", "EOSE", "CLOSED"]) {
                     let mut closed = session
                         .get::<ClosedSubscriptions>()
                         .cloned()
@@ -375,8 +383,14 @@ impl Extension for Auth {
                     }
                 }
                 IncomingMessage::Req(sub) | IncomingMessage::Count(sub) => {
-                    if let Err(err) = self.check_read_permission(session) {
+                    if let Err(err) = self.check_read_permission(session, "REQ") {
                         return OutgoingMessage::closed(&sub.id, &err.to_string()).into();
+                    }
+                }
+                // Reconciliation reads require the same permission as REQ.
+                IncomingMessage::NegOpen(_) | IncomingMessage::NegMsg(..) => {
+                    if let Err(err) = self.check_read_permission(session, msg.msg.command()) {
+                        return msg.reject(err.to_string());
                     }
                 }
                 _ => {}
@@ -1033,6 +1047,82 @@ mod tests {
             .await?;
         let item = framed.next().await.unwrap()?;
         assert_eq!(item, ws::Frame::Close(Some(ws::CloseCode::Normal.into())));
+
+        Ok(())
+    }
+
+    /// NEG-OPEN requires the same read permission as REQ.
+    #[actix_rt::test]
+    async fn neg_open_requires_the_req_permission() -> Result<()> {
+        let mut rng = thread_rng();
+        let key_pair = Keypair::new_global(&mut rng);
+        let pubkey = XOnlyPublicKey::from_keypair(&key_pair).0;
+
+        let app = create_test_app("auth-neg-open")?;
+        {
+            let mut w = app.setting.write();
+            w.extra = serde_json::from_str(&format!(
+                r#"{{
+                "auth": {{
+                    "enabled": true,
+                    "req": {{
+                        "pubkey_whitelist": ["{}"]
+                    }}
+                }}
+            }}"#,
+                pubkey
+            ))?;
+        }
+        let app = app.add_extension(Auth::new())?;
+        let app = web::Data::new(app);
+
+        let mut srv = actix_test::start(move || create_web_app(app.clone()));
+        let mut framed = srv.ws_at("/").await.unwrap();
+
+        let state: (String, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert_eq!(state.0, "AUTH");
+
+        // Before authenticating: refused, and reported on the NIP-77 channel so
+        // the client is not left waiting for a NEG-MSG that never comes.
+        framed
+            .send(ws::Message::Text(
+                r#"["NEG-OPEN", "sync", {}, "61"]"#.into(),
+            ))
+            .await?;
+        let res: (String, String, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert_eq!(res.0, "NEG-ERR");
+        assert_eq!(res.1, "sync");
+        assert!(res.2.contains("auth-required"), "got {}", res.2);
+
+        // After authenticating as a whitelisted pubkey the auth extension lets
+        // it through; with no negentropy extension registered the core answers.
+        let event = Event::create(
+            &key_pair,
+            now(),
+            22242,
+            vec![vec!["challenge".to_owned(), state.1.clone()]],
+            "".to_owned(),
+        )?;
+        framed
+            .send(ws::Message::Text(format!(r#"["AUTH", {}]"#, event).into()))
+            .await?;
+        let ok: (String, String, bool, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert!(ok.2);
+
+        framed
+            .send(ws::Message::Text(
+                r#"["NEG-OPEN", "sync", {}, "61"]"#.into(),
+            ))
+            .await?;
+        let res: (String, String, String) = parse_text(&framed.next().await.unwrap()?)?;
+        assert_eq!(
+            res,
+            (
+                "NEG-ERR".to_owned(),
+                "sync".to_owned(),
+                "closed: reconciliation unsupported".to_owned()
+            )
+        );
 
         Ok(())
     }

@@ -21,6 +21,11 @@ pub mod search;
 #[cfg(feature = "search")]
 pub use search::Search;
 
+#[cfg(feature = "negentropy")]
+pub mod negentropy;
+#[cfg(feature = "negentropy")]
+pub use negentropy::Negentropies;
+
 #[cfg(test)]
 mod config_tests;
 
