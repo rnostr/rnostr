@@ -10,6 +10,11 @@ fn invalid_configuration_prevents_startup() -> anyhow::Result<()> {
     for (text, expected, environment) in [
         ("[auth]\nenabled = \"yes\"", "[auth]", None),
         (
+            "[event_policy]\nenabled = true\nallowed_kinds = false",
+            "[event_policy]",
+            None,
+        ),
+        (
             "[auth]\nenabled = true",
             "[auth]",
             Some(("RNOSTR_AUTH__ENABLED", "bad")),

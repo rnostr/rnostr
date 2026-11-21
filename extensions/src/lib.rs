@@ -1,6 +1,9 @@
 pub mod auth;
 pub use auth::Auth;
 
+pub mod event_policy;
+pub use event_policy::EventPolicy;
+
 #[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "metrics")]
