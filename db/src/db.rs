@@ -32,6 +32,10 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 const MAX_TAG_VALUE_SIZE: usize = 255;
 const DB_VERSION: &str = "4";
 
+/// Result of [`Iter::index_pairs`]: the `(created_at, id)` pairs, whether the
+/// scan reached the end of the matches, and the scan stats.
+pub type IndexPairs = (Vec<(u64, [u8; 32])>, bool, Stats);
+
 #[derive(Clone)]
 pub struct Db {
     inner: Lmdb,
@@ -999,6 +1003,15 @@ where
         Ok(v)
     }
 
+    fn matching_index(&mut self, key: &IndexKey) -> Result<Option<&'txn ArchivedEventIndex>> {
+        let event = decode_event_index(self.index_data(key)?)?;
+        self.get_index += 1;
+        Ok(event.filter(|event| {
+            matches!(self.match_index, MatchIndex::None)
+                || self.match_index.r#match(&self.filter, event)
+        }))
+    }
+
     fn limit(&self, num: u64) -> bool {
         if let Some(limit) = self.filter.limit {
             num >= limit
@@ -1010,22 +1023,11 @@ where
     fn next_inner(&mut self) -> Result<Option<J>, Error> {
         while let Some(item) = self.group.next() {
             let key = item?;
-            if matches!(self.match_index, MatchIndex::None) {
+            if matches!(self.match_index, MatchIndex::None) || self.matching_index(&key)?.is_some()
+            {
                 self.get_data += 1;
                 if let Some(event) = self.document(&key)? {
                     return Ok(Some(event));
-                }
-            } else {
-                let data = self.index_data(&key)?;
-                let event = decode_event_index(data)?;
-                self.get_index += 1;
-                if let Some(event) = event {
-                    if self.match_index.r#match(&self.filter, event) {
-                        self.get_data += 1;
-                        if let Some(event) = self.document(&key)? {
-                            return Ok(Some(event));
-                        }
-                    }
                 }
             }
         }
@@ -1040,11 +1042,18 @@ where
 {
     /// Limit the total scan time and report [`Error::ScanTimeout`] if it is exceeded
     pub fn scan_time(&mut self, timeout: Duration, check_step: u64) {
+        self.scan_time_with(timeout, check_step, || Ok(()));
+    }
+
+    pub fn scan_time_with<F>(&mut self, timeout: Duration, check_step: u64, mut check: F)
+    where
+        F: FnMut() -> Result<()> + Clone + 'static,
+    {
         let start = Instant::now();
         let mut last = check_step;
         self.group.watcher(Box::new(move |count| {
             if count > last {
-                // check
+                check()?;
                 if start.elapsed() > timeout {
                     return Err(Error::ScanTimeout);
                 }
@@ -1063,27 +1072,40 @@ where
         }
     }
 
+    /// Collect the matching events as `(created_at, id)` pairs for NIP-77
+    /// reconciliation, reading only the index tree and never the event bodies.
+    ///
+    /// Scanning stops after `max` pairs; the returned flag is `false` when more
+    /// were available, so the caller can reject an over-large query rather than
+    /// reconcile a subset. `filter.limit` is ignored, unlike in [`Iter::size`].
+    pub fn index_pairs(mut self, max: usize) -> Result<IndexPairs> {
+        let mut pairs = Vec::new();
+        let mut complete = true;
+
+        while let Some(item) = self.group.next() {
+            let key = item?;
+            if let Some(event) = self.matching_index(&key)? {
+                if pairs.len() >= max {
+                    complete = false;
+                    break;
+                }
+                pairs.push((event.created_at(), *event.id()));
+            }
+        }
+
+        Ok((pairs, complete, self.stats()))
+    }
+
     /// only count iter size
     pub fn size(mut self) -> Result<(u64, Stats)> {
         let mut len = 0;
         while let Some(item) = self.group.next() {
             let key = item?;
-            if matches!(self.match_index, MatchIndex::None) {
+            if matches!(self.match_index, MatchIndex::None) || self.matching_index(&key)?.is_some()
+            {
                 len += 1;
                 if self.limit(len) {
                     break;
-                }
-            } else {
-                let data = self.index_data(&key)?;
-                let event = decode_event_index(data)?;
-                self.get_index += 1;
-                if let Some(event) = event {
-                    if self.match_index.r#match(&self.filter, event) {
-                        len += 1;
-                        if self.limit(len) {
-                            break;
-                        }
-                    }
                 }
             }
         }

@@ -26,6 +26,7 @@ nostr-extensions = { version = "0.4.9", path = "./extensions", default-features 
     "rate_limiter",
     "count",
     "search",
+    "negentropy",
 ] }
 rayon = "1.10.0"
 thiserror = "1.0.63"

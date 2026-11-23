@@ -26,6 +26,9 @@ actix-web = "4.9.0"
 parking_lot = "0.12.3"
 tracing = "0.1.40"
 governor = { version = "0.6.3", optional = true }
+negentropy = { version = "0.5.3", optional = true }
+hex = { version = "0.4", optional = true }
+tokio = { version = "1", features = ["sync", "macros", "time"], optional = true }
 
 [features]
 default = [
@@ -33,6 +36,7 @@ default = [
     "rate_limiter",
     "count",
     "search",
+    "negentropy",
     "search-japanese",
     "search-korean",
 ]
@@ -42,6 +46,7 @@ search-korean = ["nostr-relay/search-korean"]
 metrics = ["metrics-exporter-prometheus", "metrics-util"]
 rate_limiter = ["governor"]
 count = []
+negentropy = ["dep:negentropy", "dep:hex", "dep:tokio"]
 
 [dev-dependencies]
 actix-codec = "0.5.2"

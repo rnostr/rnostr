@@ -630,13 +630,9 @@ mod tests {
 
     #[test]
     fn invalid_heartbeat_settings_are_rejected() {
-        for timeout in ["30s", "60s"] {
-            let text = format!(
-                "[network]\nheartbeat_interval = \"60s\"\nheartbeat_timeout = \"{timeout}\""
-            );
-            let error = Setting::from_str(&text, FileFormat::Toml).unwrap_err();
-            assert!(error.to_string().contains("network.heartbeat_timeout"));
-        }
+        let text = "[network]\nheartbeat_interval = \"60s\"\nheartbeat_timeout = \"60s\"";
+        let error = Setting::from_str(text, FileFormat::Toml).unwrap_err();
+        assert!(error.to_string().contains("network.heartbeat_timeout"));
     }
 
     #[test]

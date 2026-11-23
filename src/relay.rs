@@ -49,9 +49,15 @@ fn register_extensions(app_data: App) -> nostr_relay::Result<App> {
         .add_extension(nostr_extensions::Metrics::new())?
         .add_extension(nostr_extensions::Auth::new())?
         .add_extension(nostr_extensions::Ratelimiter::new())?
+        .add_extension(nostr_extensions::Count::new(db.clone()))?
         .add_extension(nostr_extensions::EventPolicy::new())?
-        .add_extension(nostr_extensions::Count::new(db))?
-        .add_extension(nostr_extensions::Search::new())
+        .add_extension(nostr_extensions::Search::new())?
+        .add_extension(nostr_extensions::Negentropies::new(db))?
+        .web_server()?
+        .await?;
+    info!("Relay server shutdown");
+
+    Ok(())
 }
 
 #[cfg(test)]

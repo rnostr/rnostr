@@ -32,6 +32,7 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 - [x] NIP-45: Counting results. [experimental](#count)
 - [x] NIP-50: Keywords filter. [experimental](#search)
 - [x] NIP-70: Protected Events
+- [x] NIP-77: Negentropy syncing. [experimental](#negentropy)
 
 ### Extensions
 
@@ -82,6 +83,13 @@ When the query results are too large (millions) will trigger a slow query. `sett
 It reduces write concurrency and makes space usage significantly larger. So it is suitable for use in private or paid relay.
 
 Now we only index the content of `kind: 1` note event.
+
+#### Negentropy
+
+[NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) lets clients and
+the relay identify missing events without transferring the whole matching set.
+`NEG-OPEN` follows the same `[auth.req]` permissions and `[limitation]` checks as
+`REQ`. An explicit filter `limit` is rejected with `NEG-ERR`.
 
 ## Usage
 
