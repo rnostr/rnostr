@@ -3,10 +3,12 @@
 # Invalid settings prevent startup; invalid reloads keep the previous configuration.
 #
 # config relay information
+# https://github.com/nostr-protocol/nips/blob/master/11.md
 [information]
 name = "rnostr"
 description = "A high-performance and scalable nostr relay written in Rust."
 software = "https://github.com/rnostr/rnostr"
+# icon = ""
 # pubkey = ""
 # contact = ""
 
@@ -32,6 +34,9 @@ port = 8080
 
 # redirect to other site when user access the http index page
 # index_redirect_to = "https://example.com"
+
+# redirect to favicon url when clients access the http favicon.ico path
+# favicon_redirect_to = "https://example.com/favicon.ico"
 
 # heartbeat timeout (default 120 seconds, must bigger than heartbeat interval)
 # How long before lack of client response causes a timeout

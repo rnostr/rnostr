@@ -88,6 +88,7 @@ pub fn deserialize_tables<'de, D: serde::Deserializer<'de>, T: DeserializeOwned>
 pub struct Information {
     pub name: String,
     pub description: String,
+    pub icon: Option<String>,
     pub pubkey: Option<String>,
     pub contact: Option<String>,
     pub software: String,
@@ -102,6 +103,7 @@ impl Default for Information {
         Self {
             name: Default::default(),
             description: Default::default(),
+            icon: Default::default(),
             pubkey: Default::default(),
             contact: Default::default(),
             software: Default::default(),
@@ -159,6 +161,9 @@ pub struct Network {
 
     /// redirect to other site when user access the http index page
     pub index_redirect_to: Option<String>,
+
+    /// redirect to favicon url when clients access the http favicon.ico path
+    pub favicon_redirect_to: Option<String>,
 }
 
 impl Default for Network {
@@ -170,6 +175,7 @@ impl Default for Network {
             heartbeat_timeout: Duration::from_secs(120).try_into().unwrap(),
             real_ip_header: None,
             index_redirect_to: None,
+            favicon_redirect_to: None,
         }
     }
 }
@@ -440,6 +446,7 @@ impl Setting {
         let mut val = json!({
             "name": info.name,
             "description": info.description,
+            "icon": info.icon,
             "pubkey": info.pubkey,
             "contact": info.contact,
             "software": info.software,
