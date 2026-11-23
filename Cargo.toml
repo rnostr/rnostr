@@ -34,6 +34,10 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
+actix-web = "4.9.0"
+actix-web-actors = "4.3.1"
+futures-util = "0.3.30"
+serde_json = "1.0.127"
 tempfile = "3.12.0"
 
 [features]

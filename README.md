@@ -61,6 +61,12 @@ Read permission changes apply to open subscriptions on their next event delivery
 Blocked connections close with WebSocket policy code 1008. Clients needing
 authentication receive `CLOSED auth-required:` and can authenticate and resubscribe.
 
+#### Event policy
+
+Restrict new `EVENT` writes by kind and optional `d`-tag identifiers, after authentication and applicable rate limits. Disabled by default; see `[event_policy]` in the [config file](./rnostr.example.toml) for rules and examples. Existing events remain readable. Enabled policies advertise `limitation.restricted_writes` in NIP-11.
+
+Invalid policies prevent startup. With `--watch`, an invalid reload keeps the previous configuration and logs an error.
+
 #### Rate limiter
 
 Limit event write frequency.

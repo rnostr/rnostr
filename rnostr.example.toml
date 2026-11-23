@@ -103,6 +103,19 @@ enabled = false
 # event_pubkey_blacklist = ["xxxx"]
 # allow_mentioning_whitelisted_pubkeys = true
 
+# Event write policy (existing events remain readable)
+[event_policy]
+enabled = false
+# An enabled policy with an empty allowlist rejects all writes.
+# Invalid policies fail startup; invalid reloads keep the previous configuration.
+allowed_kinds = [1, 5, 30023, 30078]
+
+# Optional d-tag restrictions for kinds 30000–39999 in allowed_kinds.
+# The first d tag anywhere supplies the value; missing tags/values mean "".
+# Kinds omitted from this table accept any identifier.
+[event_policy.identifiers]
+"30078" = ["profile", "settings", "archive"]
+
 # IP Rate limiter extension
 [rate_limiter]
 enabled = false
