@@ -109,9 +109,13 @@ impl Db {
         // word
         let bytes = writer.get(&self.t_uid_word, uid)?;
         if let Some(bytes) = bytes {
-            let bytes = bytes.to_vec();
+            // copy to an aligned buffer, validation requires aligned bytes
+            let mut aligned = rkyv::AlignedVec::with_capacity(bytes.len());
+            aligned.extend_from_slice(bytes);
+            let bytes = aligned;
             writer.del(&self.t_uid_word, uid, None)?;
-            let word = unsafe { rkyv::archived_root::<Vec<Vec<u8>>>(&bytes) };
+            let word = rkyv::check_archived_root::<Vec<Vec<u8>>>(&bytes)
+                .map_err(|e| Error::Deserialization(e.to_string()))?;
             for item in word.as_slice() {
                 writer.del(&self.t_word, IndexKey::encode_word(item, time), Some(uid))?;
             }

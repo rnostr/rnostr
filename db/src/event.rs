@@ -27,6 +27,7 @@ type BuildTags = (Tags, Option<u64>, Option<[u8; 32]>);
     RkyvDeserialize,
     RkyvSerialize,
 )]
+#[archive(check_bytes)]
 pub struct EventIndex {
     #[serde(with = "hex::serde")]
     id: [u8; 32],
@@ -50,17 +51,18 @@ pub struct EventIndex {
 }
 
 impl EventIndex {
+    /// Access the archived index without copying.
+    /// The bytes are validated, invalid or unaligned bytes return an error.
     pub fn from_zeroes(bytes: &[u8]) -> Result<&ArchivedEventIndex, Error> {
-        let archived = unsafe { rkyv::archived_root::<Self>(bytes) };
-        Ok(archived)
+        rkyv::check_archived_root::<Self>(bytes).map_err(|e| Error::Deserialization(e.to_string()))
     }
 
     pub fn from_bytes<B: AsRef<[u8]>>(bytes: B) -> Result<Self, Error> {
-        let bytes = bytes.as_ref();
-        let archived = unsafe { rkyv::archived_root::<Self>(bytes) };
+        let archived = Self::from_zeroes(bytes.as_ref())?;
+        // deserialize with `rkyv::Infallible` never fails
         let deserialized: Self = archived
             .deserialize(&mut rkyv::Infallible)
-            .map_err(|e| Error::Deserialization(e.to_string()))?;
+            .unwrap_or_else(|e| match e {});
         Ok(deserialized)
     }
 
@@ -668,6 +670,58 @@ mod tests {
         assert_eq!(event.index().tags().len(), 0);
         let e2 = EventIndex::from_bytes(&event.index().to_bytes()?)?;
         assert_eq!(&e2, event.index());
+        Ok(())
+    }
+
+    #[test]
+    fn index_event_invalid_bytes() -> Result<()> {
+        // https://github.com/rnostr/rnostr/issues/56
+        let tags = vec![vec!["t".to_string(), "nostr".to_string()]];
+        let index = EventIndex::new([1; 32], [2; 32], 1700000000, 1, &tags)?;
+        let bytes = index.to_bytes()?;
+        assert_eq!(EventIndex::from_bytes(&bytes)?, index);
+        assert_eq!(EventIndex::from_zeroes(&bytes)?.tags.len(), 1);
+
+        // corrupt the length of the tag value: 5 -> 0x100005
+        let mut buf = bytes.clone();
+        assert_eq!(buf[20], 5);
+        buf[22] = 0x10;
+        assert!(matches!(
+            EventIndex::from_bytes(&buf),
+            Err(Error::Deserialization(_))
+        ));
+        assert!(matches!(
+            EventIndex::from_zeroes(&buf),
+            Err(Error::Deserialization(_))
+        ));
+
+        // flipping any single byte must never read out of bounds
+        for i in 0..bytes.len() {
+            for v in [0x00, 0x7f, 0x80, 0xff] {
+                let mut buf = bytes.clone();
+                buf[i] = v;
+                if let Ok(e) = EventIndex::from_bytes(&buf) {
+                    for (k, v) in e.tags() {
+                        assert!(k.len() + v.len() <= buf.len());
+                    }
+                }
+                let _ = EventIndex::from_zeroes(&buf);
+            }
+        }
+
+        // truncated, empty and garbage bytes
+        assert!(EventIndex::from_bytes(&bytes[..bytes.len() - 8]).is_err());
+        assert!(EventIndex::from_bytes([]).is_err());
+        let mut garbage = AlignedVec::new();
+        garbage.extend_from_slice(&[0xff; 160]);
+        assert!(EventIndex::from_bytes(&garbage).is_err());
+        assert!(EventIndex::from_zeroes(&garbage).is_err());
+
+        // unaligned bytes are rejected instead of being read
+        let mut unaligned = AlignedVec::new();
+        unaligned.push(0);
+        unaligned.extend_from_slice(&bytes);
+        assert!(EventIndex::from_zeroes(&unaligned[1..]).is_err());
         Ok(())
     }
 
