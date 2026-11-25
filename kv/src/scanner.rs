@@ -107,6 +107,7 @@ impl<E> Clone for Box<dyn ScannerWatcher<E>> {
     }
 }
 
+/// Iteration ends after the first scan or watcher error.
 pub struct Group<'txn, K, E>
 where
     K: TimeKey,
@@ -114,6 +115,7 @@ where
 {
     onlyone: Option<GroupItemType<'txn, K, E>>,
     items: Vec<GroupItemType<'txn, K, E>>,
+    initialized: usize,
     founds: SortedKeyList<SortItemType, K>,
     pub scan_times: u64,
     cur_times: u64,
@@ -133,6 +135,7 @@ where
         Self {
             onlyone: None,
             items: Vec::new(),
+            initialized: 0,
             founds: SortedKeyList::new(reverse),
             scan_times: 0,
             cur_times: 0,
@@ -152,45 +155,41 @@ where
         Ok(())
     }
 
-    pub fn add(&mut self, scanner: GroupItemType<'txn, K, E>) -> Result<(), E> {
+    pub fn add(&mut self, mut scanner: GroupItemType<'txn, K, E>) -> Result<(), E> {
         if self.done {
             return Ok(());
+        }
+        if let Some(watcher) = &self.watcher {
+            scanner.watcher(watcher.clone());
         }
         // only one
         if self.items.is_empty() && self.onlyone.is_none() {
             self.onlyone = Some(scanner);
         } else {
-            if self.onlyone.is_some() {
-                let s = self.onlyone.take().unwrap();
-                self.add_to_list(s)?;
+            if let Some(scanner) = self.onlyone.take() {
+                self.items.push(scanner);
             }
-            self.add_to_list(scanner)?;
+            self.items.push(scanner);
         }
         Ok(())
     }
 
-    fn add_to_list(&mut self, mut scanner: GroupItemType<'txn, K, E>) -> Result<(), E> {
-        if self.done {
-            return Ok(());
+    fn initialize(&mut self) -> Result<(), E> {
+        // Delay the first reads until callers have installed their watcher.
+        while self.initialized < self.items.len() && !self.done {
+            let key = self.initialized;
+            self.initialized += 1;
+            let scanner = &mut self.items[key];
+            let item = scanner.next();
+            let count = scanner.cur_times();
+            self.watch(count)?;
+            if let Some(item) = item {
+                self.founds.add(key, item?);
+            } else if self.and {
+                self.done = true;
+                self.founds.clear();
+            }
         }
-
-        let key = self.items.len();
-
-        let item = scanner.next();
-        self.scan_times += scanner.cur_times();
-        self.cur_times += scanner.cur_times();
-
-        // get the first
-        if let Some(item) = item {
-            self.founds.add(key, item?);
-        } else if self.and {
-            self.done = true;
-            self.founds.clear();
-            return Ok(());
-        }
-
-        self.items.push(scanner);
-
         Ok(())
     }
 
@@ -279,16 +278,8 @@ where
 
         Ok(Some(cur.1))
     }
-}
 
-impl<'txn, K, E> Iterator for Group<'txn, K, E>
-where
-    K: TimeKey,
-    E: From<Error>,
-{
-    type Item = Result<K, E>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.cur_times = 0;
+    fn next_inner(&mut self) -> Option<Result<K, E>> {
         if let Some(scanner) = &mut self.onlyone {
             let item = scanner.next();
             let count = scanner.cur_times();
@@ -298,6 +289,9 @@ where
                 item
             }
         } else {
+            if let Err(err) = self.initialize() {
+                return Some(Err(err));
+            }
             if self.founds.is_empty() || self.done {
                 return None;
             }
@@ -307,6 +301,27 @@ where
                 self.next_or().transpose()
             }
         }
+    }
+}
+
+impl<'txn, K, E> Iterator for Group<'txn, K, E>
+where
+    K: TimeKey,
+    E: From<Error>,
+{
+    type Item = Result<K, E>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.cur_times = 0;
+        if self.done {
+            return None;
+        }
+        let item = self.next_inner();
+        if matches!(item, Some(Err(_))) {
+            self.done = true;
+            self.founds.clear();
+        }
+        item
     }
 }
 
@@ -373,6 +388,7 @@ where
     times: u64,
     // current next scan times
     cur_times: u64,
+    watcher: Option<ScannerWatcherType<E>>,
 }
 
 impl<'txn, K, E> Scanner<'txn, K, E>
@@ -399,6 +415,7 @@ where
             until,
             times: 0,
             cur_times: 0,
+            watcher: None,
         }
     }
 
@@ -407,6 +424,9 @@ where
         loop {
             self.times += 1;
             self.cur_times += 1;
+            if let Some(watcher) = &mut self.watcher {
+                watcher(self.times)?;
+            }
             if let Some(item) = self.inner.next() {
                 let item = item?;
                 let item_key = item.0;
@@ -485,8 +505,8 @@ where
 }
 
 impl<'txn, K: TimeKey, E: From<Error>> GroupItem<'txn, K, E> for Scanner<'txn, K, E> {
-    fn watcher(&mut self, _watcher: ScannerWatcherType<E>) {
-        // ignore
+    fn watcher(&mut self, watcher: ScannerWatcherType<E>) {
+        self.watcher = Some(watcher);
     }
 
     fn cur_times(&self) -> u64 {

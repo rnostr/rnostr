@@ -30,7 +30,11 @@ pub fn upper(mut key: Vec<u8>) -> Option<Vec<u8>> {
 }
 
 const MAX_TAG_VALUE_SIZE: usize = 255;
-const DB_VERSION: &str = "3";
+const DB_VERSION: &str = "4";
+
+/// Result of [`Iter::index_pairs`]: the `(created_at, id)` pairs, whether the
+/// scan reached the end of the matches, and the scan stats.
+pub type IndexPairs = (Vec<(u64, [u8; 32])>, bool, Stats);
 
 #[derive(Clone)]
 pub struct Db {
@@ -163,7 +167,9 @@ impl Db {
         // replacement index
         if let Some(k) = encode_replace_key(index_event.kind(), index_event.pubkey(), event.tags())
         {
-            writer.del(&self.t_replacement, k, None)?;
+            if writer.get(&self.t_replacement, &k)? == Some(uid) {
+                writer.del(&self.t_replacement, k, None)?;
+            }
         }
 
         // expiration
@@ -431,7 +437,7 @@ impl Db {
             return Ok(CheckEventResult::Deleted);
         }
 
-        // [NIP-09](https://nips.be/9)
+        // [NIP-09](https://github.com/nostr-protocol/nips/blob/master/09.md)
         // delete event
         if event.kind() == 5 {
             for tag in event.index().tags() {
@@ -997,6 +1003,15 @@ where
         Ok(v)
     }
 
+    fn matching_index(&mut self, key: &IndexKey) -> Result<Option<&'txn ArchivedEventIndex>> {
+        let event = decode_event_index(self.index_data(key)?)?;
+        self.get_index += 1;
+        Ok(event.filter(|event| {
+            matches!(self.match_index, MatchIndex::None)
+                || self.match_index.r#match(&self.filter, event)
+        }))
+    }
+
     fn limit(&self, num: u64) -> bool {
         if let Some(limit) = self.filter.limit {
             num >= limit
@@ -1008,22 +1023,11 @@ where
     fn next_inner(&mut self) -> Result<Option<J>, Error> {
         while let Some(item) = self.group.next() {
             let key = item?;
-            if matches!(self.match_index, MatchIndex::None) {
+            if matches!(self.match_index, MatchIndex::None) || self.matching_index(&key)?.is_some()
+            {
                 self.get_data += 1;
                 if let Some(event) = self.document(&key)? {
                     return Ok(Some(event));
-                }
-            } else {
-                let data = self.index_data(&key)?;
-                let event = decode_event_index(data)?;
-                self.get_index += 1;
-                if let Some(event) = event {
-                    if self.match_index.r#match(&self.filter, event) {
-                        self.get_data += 1;
-                        if let Some(event) = self.document(&key)? {
-                            return Ok(Some(event));
-                        }
-                    }
                 }
             }
         }
@@ -1038,11 +1042,18 @@ where
 {
     /// Limit the total scan time and report [`Error::ScanTimeout`] if it is exceeded
     pub fn scan_time(&mut self, timeout: Duration, check_step: u64) {
+        self.scan_time_with(timeout, check_step, || Ok(()));
+    }
+
+    pub fn scan_time_with<F>(&mut self, timeout: Duration, check_step: u64, mut check: F)
+    where
+        F: FnMut() -> Result<()> + Clone + 'static,
+    {
         let start = Instant::now();
         let mut last = check_step;
         self.group.watcher(Box::new(move |count| {
             if count > last {
-                // check
+                check()?;
                 if start.elapsed() > timeout {
                     return Err(Error::ScanTimeout);
                 }
@@ -1061,27 +1072,40 @@ where
         }
     }
 
+    /// Collect the matching events as `(created_at, id)` pairs for NIP-77
+    /// reconciliation, reading only the index tree and never the event bodies.
+    ///
+    /// Scanning stops after `max` pairs; the returned flag is `false` when more
+    /// were available, so the caller can reject an over-large query rather than
+    /// reconcile a subset. `filter.limit` is ignored, unlike in [`Iter::size`].
+    pub fn index_pairs(mut self, max: usize) -> Result<IndexPairs> {
+        let mut pairs = Vec::new();
+        let mut complete = true;
+
+        while let Some(item) = self.group.next() {
+            let key = item?;
+            if let Some(event) = self.matching_index(&key)? {
+                if pairs.len() >= max {
+                    complete = false;
+                    break;
+                }
+                pairs.push((event.created_at(), *event.id()));
+            }
+        }
+
+        Ok((pairs, complete, self.stats()))
+    }
+
     /// only count iter size
     pub fn size(mut self) -> Result<(u64, Stats)> {
         let mut len = 0;
         while let Some(item) = self.group.next() {
             let key = item?;
-            if matches!(self.match_index, MatchIndex::None) {
+            if matches!(self.match_index, MatchIndex::None) || self.matching_index(&key)?.is_some()
+            {
                 len += 1;
                 if self.limit(len) {
                     break;
-                }
-            } else {
-                let data = self.index_data(&key)?;
-                let event = decode_event_index(data)?;
-                self.get_index += 1;
-                if let Some(event) = event {
-                    if self.match_index.r#match(&self.filter, event) {
-                        len += 1;
-                        if self.limit(len) {
-                            break;
-                        }
-                    }
                 }
             }
         }
@@ -1113,7 +1137,129 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::upper;
+    use super::*;
+
+    #[test]
+    fn legacy_replacement_schema_requires_reimport() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Db::open(root.path()).unwrap();
+        db.check_schema().unwrap();
+        let mut writer = db.writer().unwrap();
+        writer.put(&db.t_meta, "version", "3").unwrap();
+        db.commit(writer).unwrap();
+        assert!(matches!(db.check_schema(), Err(Error::VersionMismatch)));
+        assert_eq!(
+            db.reader().unwrap().get(&db.t_meta, "version").unwrap(),
+            Some(b"3".as_slice())
+        );
+    }
+
+    #[test]
+    fn addressable_replacement_preserves_distinct_identifiers() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Db::open(root.path()).unwrap();
+        let tags = |value: &str| vec![vec!["d".into(), value.into()]];
+        let events: Vec<_> = [
+            vec![
+                vec!["alt".into(), "text".into()],
+                vec!["d".into(), "profile".into()],
+            ],
+            tags("settings"),
+            tags("profile"),
+            vec![],
+            vec![vec!["d".into()]],
+            tags(""),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, tags)| {
+            Event::new(
+                [i as u8; 32],
+                [42; 32],
+                i as u64 + 1,
+                30078,
+                tags,
+                String::new(),
+                [0; 64],
+            )
+            .unwrap()
+        })
+        .collect();
+        db.batch_put(&events).unwrap();
+        {
+            let reader = db.reader().unwrap();
+            for (i, event) in events.iter().enumerate() {
+                assert_eq!(
+                    db.get::<String, _, _>(&reader, event.id())
+                        .unwrap()
+                        .is_some(),
+                    [1, 2, 5].contains(&i)
+                );
+            }
+        }
+        db.batch_del([events[2].id()]).unwrap();
+        db.batch_put([&events[0]]).unwrap();
+        assert!(db
+            .get::<String, _, _>(&db.reader().unwrap(), events[0].id())
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn deleting_a_legacy_event_preserves_another_events_replacement_entry() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let db = Db::open(root.path())?;
+        let event = |id: u8, tags| {
+            Event::new(
+                [id; 32],
+                [42; 32],
+                id as u64,
+                30078,
+                tags,
+                String::new(),
+                [0; 64],
+            )
+            .unwrap()
+        };
+        let stale = event(
+            1,
+            vec![
+                vec!["alt".into(), "text".into()],
+                vec!["d".into(), "profile".into()],
+            ],
+        );
+        let live = event(2, vec![vec!["d".into(), "profile".into()]]);
+        let update = event(3, live.tags().clone());
+        let stale_uid = u64_to_ver(db.seq.fetch_add(1, Ordering::Relaxed));
+        let live_uid = u64_to_ver(db.seq.fetch_add(1, Ordering::Relaxed));
+        let replacement = encode_replace_key(live.kind(), live.pubkey(), live.tags());
+        {
+            let mut writer = db.writer()?;
+            // The old lookup indexed a non-leading d tag under the empty identifier.
+            db.put_event(
+                &mut writer,
+                &stale,
+                &stale_uid,
+                &encode_replace_key(stale.kind(), stale.pubkey(), &[]),
+            )?;
+            db.put_event(&mut writer, &live, &live_uid, &replacement)?;
+            db.commit(writer)?;
+        }
+        db.batch_del([stale.id()])?;
+        {
+            let reader = db.reader()?;
+            assert_eq!(
+                reader.get(&db.t_replacement, replacement.as_ref().unwrap())?,
+                Some(live_uid.as_slice())
+            );
+            assert!(db.get::<String, _, _>(&reader, stale.id())?.is_none());
+        }
+        db.batch_put([&update])?;
+        let reader = db.reader()?;
+        assert!(db.get::<String, _, _>(&reader, live.id())?.is_none());
+        assert!(db.get::<String, _, _>(&reader, update.id())?.is_some());
+        Ok(())
+    }
 
     #[test]
     pub fn test_upper_fn() {

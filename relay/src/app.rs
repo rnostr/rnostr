@@ -1,4 +1,4 @@
-use crate::{setting::SettingWrapper, Extension, Extensions, Result, Server, Setting};
+use crate::{setting::SettingWrapper, Error, Extension, Extensions, Result, Server, Setting};
 use actix::Addr;
 use actix_cors::Cors;
 use actix_web::{
@@ -103,6 +103,7 @@ pub struct App {
     pub db: Arc<Db>,
     pub setting: SettingWrapper,
     pub extensions: Arc<RwLock<Extensions>>,
+    env_prefix: Option<String>,
 }
 
 impl App {
@@ -114,6 +115,7 @@ impl App {
         data_path: Option<P>,
     ) -> Result<Self> {
         let extensions = Arc::new(RwLock::new(Extensions::default()));
+        let env_prefix = setting_env_prefix.clone();
         let c_extensions = Arc::clone(&extensions);
         let env_notice = setting_env_prefix
             .as_ref()
@@ -128,9 +130,8 @@ impl App {
         let setting = if watch && setting_path.is_some() {
             let path = setting_path.as_ref().unwrap().as_ref();
             info!("Watch config file {:?}{}", path, env_notice);
-            SettingWrapper::watch(path, setting_env_prefix, move |s| {
-                let mut w = c_extensions.write();
-                w.call_setting(s);
+            SettingWrapper::watch(path, setting_env_prefix, move |s, candidate| {
+                c_extensions.write().call_setting(s, candidate)
             })?
         } else if let Some(path) = setting_path {
             info!("Load config {:?}{}", path.as_ref(), env_notice);
@@ -163,17 +164,37 @@ impl App {
             setting,
             db,
             extensions,
+            env_prefix,
         })
     }
 
-    pub fn add_extension<E: Extension + 'static>(self, mut ext: E) -> Self {
+    pub fn add_extension<E: Extension + 'static>(self, mut ext: E) -> Result<Self> {
         info!("Add extension {}", ext.name());
-        ext.setting(&self.setting);
         {
             let mut w = self.extensions.write();
+            let mut candidate = self.setting.read().clone();
+            let update = ext.setting(&mut candidate)?;
+            *self.setting.write() = candidate;
+            update();
             w.add(ext);
         }
-        self
+        Ok(self)
+    }
+
+    /// Validate and apply a nonempty configuration, retaining the previous one on error.
+    pub fn reload<P: AsRef<Path>>(&self, file: P) -> Result<()> {
+        let candidate = Setting::read_for_reload(file.as_ref(), self.env_prefix.as_deref())?
+            .ok_or(Error::Str("cannot reload an empty configuration"))?;
+        self.extensions
+            .write()
+            .call_setting(&self.setting, candidate)
+    }
+
+    /// Enable unused-section warnings after extensions and custom sections are registered.
+    pub fn finish_registration(&self) {
+        self.extensions
+            .write()
+            .finish_registration(&self.setting.read());
     }
 
     pub fn web_app(
@@ -191,6 +212,7 @@ impl App {
     }
 
     pub fn web_server(self) -> Result<actix_web::dev::Server, std::io::Error> {
+        self.finish_registration();
         let r = self.setting.read();
         let num = if r.thread.http == 0 {
             num_cpus::get()
@@ -222,9 +244,11 @@ pub fn create_web_app(
 > {
     let app = WebApp::new();
     let extensions = data.extensions.clone();
+    let mut extensions = extensions.write();
+    extensions.finish_registration(&data.setting.read());
     app.app_data(data)
         .configure(|cfg| {
-            extensions.write().call_config_web(cfg);
+            extensions.call_config_web(cfg);
         })
         .service(web::resource("/").route(web::get().to(route::index)))
         .wrap(

@@ -3,15 +3,16 @@ use nostr_relay::{
     db::{Db, Filter},
     duration::NonZeroDuration,
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
-    setting::SettingWrapper,
-    Error, Extension, ExtensionMessageResult, Session,
+    Error, Extension, ExtensionMessageResult, Session, Setting, SettingUpdate,
 };
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Instant;
 
 #[derive(Deserialize, Default, Debug)]
+#[serde(default, deny_unknown_fields)]
 pub struct CountSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
 }
 
@@ -47,12 +48,12 @@ impl Extension for Count {
         "count"
     }
 
-    fn setting(&mut self, setting: &SettingWrapper) {
-        let mut w = setting.write();
-        self.setting = w.parse_extension(self.name());
-        if self.setting.enabled {
-            w.add_nip(45);
+    fn setting<'a>(&'a mut self, setting: &mut Setting) -> nostr_relay::Result<SettingUpdate<'a>> {
+        let parsed: CountSetting = setting.parse_extension(self.name())?;
+        if parsed.enabled {
+            setting.add_nip(45);
         }
+        Ok(Box::new(move || self.setting = parsed))
     }
 
     fn message(
@@ -67,10 +68,9 @@ impl Extension for Count {
                     let timeout = session.app.setting.read().data.db_query_timeout;
                     match self.count(&sub.filters[0], timeout) {
                         Ok(size) => {
-                            return ExtensionMessageResult::Stop(OutgoingMessage(format!(
-                                r#"["COUNT","{}",{{"count": {}}}]"#,
-                                sub.id, size
-                            )))
+                            return ExtensionMessageResult::Stop(OutgoingMessage(
+                                serde_json::json!(["COUNT", sub.id, {"count": size}]).to_string(),
+                            ))
                         }
                         Err(err) => {
                             return ExtensionMessageResult::Stop(OutgoingMessage::closed(
@@ -118,6 +118,33 @@ mod tests {
     }
 
     #[actix_rt::test]
+    async fn count_escapes_subscription_ids() -> Result<()> {
+        let app = web::Data::new(create_test_app("count-escaping")?);
+        for sub_id in ["plain", "", "quote\"slash\\\n\r\t\0é", "id\",\"injected"] {
+            let mut count = Count::new(app.db.clone());
+            count.setting.enabled = true;
+            let text = serde_json::json!(["COUNT", sub_id, {}]).to_string();
+            let msg = ClientMessage::new(0, text.clone(), serde_json::from_str(&text)?);
+            let app = app.clone();
+            let _output = ws::WebsocketContext::with_factory(
+                futures_util::stream::pending::<Result<bytes::Bytes, actix_web::error::PayloadError>>(
+                ),
+                move |ctx| {
+                    let mut session = Session::new("127.0.0.1".into(), app);
+                    let ExtensionMessageResult::Stop(reply) = count.message(msg, &mut session, ctx)
+                    else {
+                        panic!("COUNT must produce a response");
+                    };
+                    let actual: serde_json::Value = serde_json::from_str(&reply.0).unwrap();
+                    assert_eq!(actual, serde_json::json!(["COUNT", sub_id, {"count": 0}]));
+                    session
+                },
+            );
+        }
+        Ok(())
+    }
+
+    #[actix_rt::test]
     async fn message() -> Result<()> {
         let mut rng = thread_rng();
         let key_pair = Keypair::new_global(&mut rng);
@@ -134,7 +161,7 @@ mod tests {
             )?;
         }
         let db = app.db.clone();
-        let app = app.add_extension(Count::new(db));
+        let app = app.add_extension(Count::new(db))?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));

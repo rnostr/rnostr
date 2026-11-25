@@ -1,6 +1,9 @@
 pub mod auth;
 pub use auth::Auth;
 
+pub mod event_policy;
+pub use event_policy::EventPolicy;
+
 #[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "metrics")]
@@ -20,6 +23,14 @@ pub use count::Count;
 pub mod search;
 #[cfg(feature = "search")]
 pub use search::Search;
+
+#[cfg(feature = "negentropy")]
+pub mod negentropy;
+#[cfg(feature = "negentropy")]
+pub use negentropy::Negentropies;
+
+#[cfg(test)]
+mod config_tests;
 
 #[cfg(test)]
 pub fn temp_data_path(p: &str) -> anyhow::Result<tempfile::TempDir> {

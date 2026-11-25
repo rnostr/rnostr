@@ -32,13 +32,22 @@ A high-performance and scalable [nostr](https://github.com/nostr-protocol/nostr)
 - [x] NIP-45: Counting results. [experimental](#count)
 - [x] NIP-50: Keywords filter. [experimental](#search)
 - [x] NIP-70: Protected Events
+- [x] NIP-77: Negentropy syncing. [experimental](#negentropy)
 
 ### Extensions
 
 The library [nostr-relay](./relay/) implements a simple extension mechanism to intercept user messages for custom processing. rnostr is built on top of [nostr-relay](./relay/) and implements several simple extensions.
 All extensions support configuration in the [config file](./rnostr.example.toml).
 
-[Custom relay and extensions](./relay/).
+Invalid configuration prevents startup; invalid reloads keep all previous
+settings. Unknown fields in core and registered extension tables are errors,
+even when disabled. Unregistered tables remain allowed; warnings identify them
+after registration and whenever a successful reload adds or restores one.
+Missing fields default; read-only information fields `version` and `supported_nips`
+are ignored.
+
+Heartbeat errors now reject startup or reload instead of falling back to defaults.
+The timeout must exceed the interval: `"2m"` needs a timeout such as `"4m"`.
 
 #### Metrics
 
@@ -46,7 +55,17 @@ Provide metrics url for [prometheus](https://prometheus.io/) scrape
 
 #### Auth
 
-[NIP-42](https://nips.be/42) Authentication, ip, auth pubkey and event pubkey whitelist blacklist
+[NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) Authentication, ip, auth pubkey and event pubkey whitelist blacklist
+
+Read permission changes apply to open subscriptions on their next event delivery.
+Blocked connections close with WebSocket policy code 1008. Clients needing
+authentication receive `CLOSED auth-required:` and can authenticate and resubscribe.
+
+#### Event policy
+
+Restrict new `EVENT` writes by kind and optional `d`-tag identifiers, after authentication and applicable rate limits. Disabled by default; see `[event_policy]` in the [config file](./rnostr.example.toml) for rules and examples. Existing events remain readable. Enabled policies advertise `limitation.restricted_writes` in NIP-11.
+
+Invalid policies prevent startup. With `--watch`, an invalid reload keeps the previous configuration and logs an error.
 
 #### Rate limiter
 
@@ -54,16 +73,23 @@ Limit event write frequency.
 
 #### Count
 
-[NIP-45](https://nips.be/45) count results.
+[NIP-45](https://github.com/nostr-protocol/nips/blob/master/45.md) count results.
 When the query results are too large (millions) will trigger a slow query. `setting.data.db_query_timeout`.
 
 #### Search
 
-[NIP-50](https://nips.be/50) Keywords filter. [nostr-db](./db/) implement a simple exact match pattern, case-insensitive, time-sorted full-text search. No performance optimization for multi-word queries, so it's experimental.
+[NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) Keywords filter. [nostr-db](./db/) implement a simple exact match pattern, case-insensitive, time-sorted full-text search. No performance optimization for multi-word queries, so it's experimental.
 
 It reduces write concurrency and makes space usage significantly larger. So it is suitable for use in private or paid relay.
 
 Now we only index the content of `kind: 1` note event.
+
+#### Negentropy
+
+[NIP-77](https://github.com/nostr-protocol/nips/blob/master/77.md) lets clients and
+the relay identify missing events without transferring the whole matching set.
+`NEG-OPEN` follows the same `[auth.req]` permissions and `[limitation]` checks as
+`REQ`. An explicit filter `limit` is rejected with `NEG-ERR`.
 
 ## Usage
 
@@ -94,6 +120,29 @@ cargo build --release
 ./target/release/rnostr relay -c ./config/rnostr.toml --watch
 
 ```
+
+With `--watch`, the config is reloaded once the file has been unchanged for 250 ms;
+a file with no settings is skipped. To update it safely, write the new config to a
+temporary file in the same directory and rename it over the watched file: a writer
+that pauses mid-file for longer than that can get a partial config applied.
+The watcher resolves symlinks at startup; replacing a symlink does not switch
+its watched target.
+
+Japanese and Korean search tokenization are enabled by default. Their dictionaries
+are downloaded by Lindera build scripts during compilation. To build without
+these downloads, while keeping search and the other relay extensions enabled:
+
+```shell
+cargo build --release --no-default-features
+```
+
+Enable either language separately with `--features search-japanese` or
+`--features search-korean`; those features require the corresponding dictionary
+downloads. `--offline` only controls Cargo itself, so it does not prevent build
+scripts from downloading dictionaries when these features are enabled.
+
+When building or testing the whole workspace, also use `--no-default-features`
+to prevent benchmark defaults from enabling the dictionaries.
 
 ### Docker
 

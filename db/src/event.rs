@@ -44,7 +44,7 @@ pub struct EventIndex {
     #[serde(skip)]
     expiration: Option<u64>,
 
-    /// [NIP-26](https://nips.be/26)
+    /// [NIP-26](https://github.com/nostr-protocol/nips/blob/master/26.md)
     #[serde(skip)]
     delegator: Option<[u8; 32]>,
 }

@@ -1,11 +1,13 @@
 use actix_web::{web, HttpResponse};
 use metrics::{describe_counter, describe_gauge, describe_histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use nostr_relay::{setting::SettingWrapper, App, Extension};
+use nostr_relay::{App, Extension, Result, Setting, SettingUpdate};
 use serde::Deserialize;
 
 #[derive(Deserialize, Default, Debug)]
+#[serde(default, deny_unknown_fields)]
 pub struct MetricsSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
     pub auth: Option<String>,
 }
@@ -35,10 +37,10 @@ impl Extension for Metrics {
         "metrics"
     }
 
-    fn setting(&mut self, setting: &SettingWrapper) {
-        let mut w = setting.write();
-        let s: MetricsSetting = w.parse_extension(self.name());
-        w.set_extension(s);
+    fn setting<'a>(&'a mut self, setting: &mut Setting) -> Result<SettingUpdate<'a>> {
+        let parsed: MetricsSetting = setting.parse_extension(self.name())?;
+        setting.set_extension(parsed);
+        Ok(Box::new(|| {}))
     }
 
     fn config_web(&mut self, cfg: &mut actix_web::web::ServiceConfig) {
@@ -110,6 +112,26 @@ pub mod tests {
     use anyhow::Result;
     use std::time::Duration;
 
+    #[test]
+    fn environment_credentials_keep_their_text() -> Result<()> {
+        for auth in ["123456", "00123456", "true", "1.0"] {
+            temp_env::with_vars(
+                [
+                    ("METRICS_ENV_METRICS__AUTH", Some(auth)),
+                    ("METRICS_ENV_METRICS__ENABLED", Some("true")),
+                ],
+                || -> Result<()> {
+                    let setting = nostr_relay::Setting::from_env("METRICS_ENV".to_owned())?;
+                    let metrics: super::MetricsSetting = setting.parse_extension("metrics")?;
+                    assert!(metrics.enabled);
+                    assert_eq!(metrics.auth.as_deref(), Some(auth));
+                    Ok(())
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     #[actix_rt::test]
     async fn metrics() -> Result<()> {
         let data = create_test_app("")?;
@@ -124,7 +146,7 @@ pub mod tests {
             }"#,
             )?;
         }
-        let data = data.add_extension(Metrics::new());
+        let data = data.add_extension(Metrics::new())?;
 
         let app = init_service(data.web_app()).await;
         sleep(Duration::from_millis(50)).await;

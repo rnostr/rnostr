@@ -1,4 +1,4 @@
-use nostr_db::{Db, Error, Event, Filter, Stats};
+use nostr_db::{Db, Error, Event, Filter, IndexPairs, Stats};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::thread::sleep;
@@ -549,6 +549,69 @@ fn count(db: &Db, filter: &Filter) -> Result<(u64, Stats)> {
     let reader = db.reader()?;
     let iter = db.iter::<String, _>(&reader, filter)?;
     iter.size()
+}
+
+fn index_pairs(db: &Db, filter: &Filter, max: usize) -> Result<IndexPairs> {
+    let reader = db.reader()?;
+    let iter = db.iter::<Vec<u8>, _>(&reader, filter)?;
+    iter.index_pairs(max)
+}
+
+/// Backs NIP-77 reconciliation: `(created_at, id)` for everything a filter
+/// matches, read from the index tree without touching the event bodies.
+#[test]
+pub fn test_index_pairs() -> Result<()> {
+    let db = create_db("test_index_pairs")?;
+    let events = (0..PER_NUM)
+        .map(|i| {
+            MyEvent {
+                id: id(31, i),
+                pubkey: author(250),
+                // Two kinds so a filter can select a subset.
+                kind: 1000 + (i % 2) as u16,
+                content: "reconcile".to_owned(),
+                created_at: i as u64,
+                ..Default::default()
+            }
+            .into()
+        })
+        .collect::<Vec<Event>>();
+    db.batch_put(events)?;
+
+    let filter = Filter::default();
+    let (pairs, complete, stats) = index_pairs(&db, &filter, 1000)?;
+    assert!(complete);
+    assert_eq!(pairs.len(), PER_NUM as usize);
+    // Event bodies are never read.
+    assert_eq!(stats.get_data, 0);
+
+    // Timestamps and ids line up with what was written.
+    let mut sorted = pairs.clone();
+    sorted.sort();
+    for (i, (created_at, event_id)) in sorted.iter().enumerate() {
+        assert_eq!(*created_at, i as u64);
+        assert_eq!(*event_id, id(31, i as u8));
+    }
+
+    // A filter that only some events match.
+    let filter = Filter::from_str(r#"{"kinds": [1000]}"#)?;
+    let (pairs, complete, _) = index_pairs(&db, &filter, 1000)?;
+    assert!(complete);
+    assert_eq!(pairs.len(), (PER_NUM as usize).div_ceil(2));
+    assert!(pairs.iter().all(|(created_at, _)| created_at % 2 == 0));
+
+    // Hitting `max` reports an incomplete scan rather than a silent subset.
+    let filter = Filter::default();
+    let (pairs, complete, _) = index_pairs(&db, &filter, 10)?;
+    assert!(!complete);
+    assert_eq!(pairs.len(), 10);
+
+    // Exactly `max` matches is still complete.
+    let (pairs, complete, _) = index_pairs(&db, &filter, PER_NUM as usize)?;
+    assert!(complete);
+    assert_eq!(pairs.len(), PER_NUM as usize);
+
+    Ok(())
 }
 
 #[test]
@@ -1269,6 +1332,54 @@ pub fn test_query_search() -> Result<()> {
     assert!(e1.1.get_data == PER_NUM as u64);
     assert!(e1.1.get_index == 0);
 
+    Ok(())
+}
+
+#[test]
+fn sparse_scans_check_timeout_before_finding_a_match() -> Result<()> {
+    let db = create_db("sparse-scan-timeout")?;
+    let events = (0..PER_NUM)
+        .map(|i| {
+            MyEvent {
+                id: id(32, i),
+                kind: 1,
+                tags: vec![
+                    vec!["t".to_owned(), "busy".to_owned()],
+                    vec!["x".to_owned(), "busy".to_owned()],
+                ],
+                ..Default::default()
+            }
+            .into()
+        })
+        .collect::<Vec<Event>>();
+    db.batch_put(events)?;
+    let reader = db.reader()?;
+    for text in [
+        r##"{"#t": ["busy"], "kinds": [2]}"##,
+        r##"{"#t": ["busy"], "#x": ["busy"], "kinds": [2]}"##,
+        r##"{"#t": ["busy", "missing"], "kinds": [2]}"##,
+    ] {
+        for desc in [false, true] {
+            let mut filter = Filter::from_str(text)?;
+            filter.desc = desc;
+            let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+            assert_eq!(iter.stats().scan_index, 0, "{text}");
+            assert!(iter.next().is_none(), "{text}");
+            assert!(iter.stats().scan_index >= u64::from(PER_NUM), "{text}");
+
+            let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+            iter.scan_time(Duration::ZERO, 1);
+            assert!(
+                matches!(iter.next(), Some(Err(Error::ScanTimeout))),
+                "{text}"
+            );
+            assert!(iter.stats().scan_index < u64::from(PER_NUM), "{text}");
+
+            let mut iter = db.iter::<Event, _>(&reader, &filter)?;
+            iter.scan_time(Duration::ZERO, 1);
+            assert!(matches!(iter.size(), Err(Error::ScanTimeout)), "{text}");
+        }
+    }
     Ok(())
 }
 

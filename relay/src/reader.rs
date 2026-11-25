@@ -91,6 +91,95 @@ mod tests {
         }
     }
 
+    #[derive(actix::Message)]
+    #[rtype(result = "()")]
+    struct Barrier;
+
+    impl Handler<Barrier> for Receiver {
+        type Result = ();
+        fn handle(&mut self, _: Barrier, _: &mut Context<Self>) {}
+    }
+
+    #[actix_rt::test]
+    async fn req_completion_and_timeout_have_distinct_terminal_messages() -> Result<()> {
+        let db = Arc::new(Db::open(temp_data_path("reader-timeout")?)?);
+        let events = (0..2500u64)
+            .map(|i| {
+                let mut id = [0; 32];
+                id[..8].copy_from_slice(&i.to_be_bytes());
+                Event::new(
+                    id,
+                    [1; 32],
+                    i,
+                    1,
+                    vec![
+                        vec!["t".to_owned(), "busy".to_owned()],
+                        vec!["x".to_owned(), "busy".to_owned()],
+                    ],
+                    String::new(),
+                    [0; 64],
+                )
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        db.batch_put(events)?;
+        for timeout in [
+            None,
+            crate::duration::NonZeroDuration::new(Duration::from_nanos(1)),
+        ] {
+            for text in [
+                "{}",
+                r##"{"#t": ["busy"], "kinds": [2]}"##,
+                r##"{"#t": ["busy"], "#x": ["busy"], "kinds": [2]}"##,
+            ] {
+                let filter = Filter::from_str(text)?;
+                let sparse = !filter.tags.is_empty();
+                let receiver = Receiver::default();
+                let messages = receiver.0.clone();
+                let receiver = receiver.start();
+                let addr = receiver.clone().recipient();
+                let db = db.clone();
+                let mut setting = Setting::default();
+                setting.data.db_query_timeout = timeout;
+                let setting: SettingWrapper = setting.into();
+                let reader = SyncArbiter::start(1, move || {
+                    Reader::new(db.clone(), addr.clone(), setting.clone())
+                });
+                reader
+                    .send(ReadEvent {
+                        id: 0,
+                        subscription: Subscription {
+                            id: "req".to_owned(),
+                            filters: vec![filter],
+                        },
+                    })
+                    .await?;
+                receiver.send(Barrier).await?;
+                let messages = messages.read();
+                let events = messages
+                    .iter()
+                    .filter(|m| m.msg.0.starts_with(r#"["EVENT","#))
+                    .count();
+                let last = &messages.last().unwrap().msg.0;
+                if timeout.is_some() {
+                    if sparse {
+                        assert_eq!(events, 0);
+                    } else {
+                        assert!(events > 0 && events < 2500);
+                    }
+                    assert!(
+                        last.starts_with(r#"["CLOSED","#) && last.contains("Scan timeout"),
+                        "{last}"
+                    );
+                    assert!(!messages.iter().any(|m| m.msg.0.starts_with(r#"["EOSE","#)));
+                } else {
+                    assert_eq!(events, if sparse { 0 } else { 2500 });
+                    assert!(last.starts_with(r#"["EOSE","#));
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[actix_rt::test]
     async fn read() -> Result<()> {
         let db = Arc::new(Db::open(temp_data_path("reader")?)?);

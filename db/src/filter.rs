@@ -38,7 +38,7 @@ impl<T> Deref for SortList<T> {
 
 /// Events filter
 ///
-/// [NIP-01](https://nips.be/1)
+/// [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md)
 
 // TODO: hashset uniq, (default limit), limit length, limit item length, empty string, invald hex prefix, validate length
 #[derive(PartialEq, Eq, Debug, Clone, Default, Deserialize)]
@@ -57,7 +57,7 @@ pub struct Filter {
     pub until: Option<u64>,
     pub limit: Option<u64>,
 
-    /// Keyword search  [NIP-50](https://nips.be/50) , [keywords renamed to search](https://github.com/nostr-protocol/nips/commit/6708a73bbcd141094c75f739c8b31446620b30e1)
+    /// Keyword search  [NIP-50](https://github.com/nostr-protocol/nips/blob/master/50.md) , [keywords renamed to search](https://github.com/nostr-protocol/nips/commit/6708a73bbcd141094c75f739c8b31446620b30e1)
     pub search: Option<String>,
 
     /// tags starts with "#", key tag length 1

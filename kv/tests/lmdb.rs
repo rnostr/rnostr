@@ -1,6 +1,61 @@
 use anyhow::Result;
 use nostr_kv::lmdb::{ffi, Db, Transaction};
-use std::ops::{Bound, Deref};
+use std::{
+    ops::{Bound, Deref},
+    sync::{mpsc, Arc, Barrier},
+    thread,
+    time::Duration,
+};
+
+#[test]
+fn reader_slot_is_released_before_its_thread_exits() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let db = Db::open_with(dir.path(), None, Some(1), Some(1_048_576), 0)?;
+    let worker_db = db.clone();
+    let (ready, arrived) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        drop(worker_db.reader().unwrap());
+        ready.send(()).unwrap();
+        released.recv_timeout(Duration::from_secs(5)).unwrap();
+    });
+    arrived.recv_timeout(Duration::from_secs(5))?;
+    let result = db.reader().map(drop);
+    release.send(())?;
+    worker.join().unwrap();
+    assert!(
+        result.is_ok(),
+        "reader slot remained tied to its thread: {result:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn environment_can_close_while_reader_threads_exit() -> Result<()> {
+    // This stress test is probabilistic: the race may not trigger even without the fix.
+    let dir = tempfile::tempdir()?;
+    for _ in 0..1_000 {
+        let db = Db::open_with(dir.path(), None, None, Some(1_048_576), 0)?;
+        let barrier = Arc::new(Barrier::new(9));
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let db = db.clone();
+            let barrier = barrier.clone();
+            workers.push(thread::spawn(move || {
+                drop(db.reader().unwrap());
+                drop(db);
+                barrier.wait();
+            }));
+        }
+        barrier.wait();
+        // All transactions have ended; thread-local destructors may still be running.
+        drop(db);
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    }
+    Ok(())
+}
 
 #[test]
 pub fn test_txn() -> Result<()> {

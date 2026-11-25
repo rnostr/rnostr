@@ -6,8 +6,7 @@ use nostr_relay::db::Event;
 use nostr_relay::{
     duration::NonZeroDuration,
     message::{ClientMessage, IncomingMessage, OutgoingMessage},
-    setting::SettingWrapper,
-    Extension, ExtensionMessageResult, Session,
+    Error, Extension, ExtensionMessageResult, Result, Session, Setting, SettingUpdate,
 };
 use parking_lot::RwLock;
 use serde::{
@@ -23,7 +22,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct EventQuota {
     /// used by metrics
     #[serde(default)]
@@ -32,6 +32,7 @@ pub struct EventQuota {
     #[serde(default)]
     pub description: String,
     pub period: NonZeroDuration,
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub limit: NonZeroU32,
     /// only limit for kinds
     /// support kind list: [1, 2, 3]
@@ -63,7 +64,9 @@ impl<'de> Visitor<'de> for RangeVisitor {
     where
         E: de::Error,
     {
-        Ok(Range(v, v + 1))
+        v.checked_add(1)
+            .map(|end| Range(v, end))
+            .ok_or_else(|| E::custom("kind is too large"))
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -113,12 +116,14 @@ impl EventQuota {
 pub trait Quotable {
     fn limit(&self) -> NonZeroU32;
     fn period(&self) -> NonZeroDuration;
-    fn quota(&self) -> Quota {
-        Quota::with_period(Duration::from_nanos(
-            (self.period().as_nanos() / self.limit().get() as u128) as u64,
-        ))
-        .unwrap()
-        .allow_burst(self.limit())
+    fn quota(&self) -> Result<Quota> {
+        let nanos = u64::try_from(self.period().as_nanos() / u128::from(self.limit().get()))
+            .map_err(|_| {
+                Error::Message("period / limit exceeds the supported interval".to_owned())
+            })?;
+        Quota::with_period(Duration::from_nanos(nanos))
+            .map(|quota| quota.allow_burst(self.limit()))
+            .ok_or_else(|| Error::Message("period / limit must be at least 1ns".to_owned()))
     }
 }
 
@@ -131,11 +136,13 @@ impl Quotable for EventQuota {
     }
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(default)]
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
 pub struct RatelimiterSetting {
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_scalar")]
     pub enabled: bool,
     /// write event rate limiter: ["EVENT"]
+    #[serde(deserialize_with = "nostr_relay::setting::deserialize_tables")]
     pub event: Vec<EventQuota>,
     /// interval at second for clearing invalid data to free up memory.
     /// default 60 non zero
@@ -198,14 +205,28 @@ impl Extension for Ratelimiter {
         "rate_limiter"
     }
 
-    fn setting(&mut self, setting: &SettingWrapper) {
-        self.setting = setting.read().parse_extension(self.name());
-        self.event_limiters = self
-            .setting
+    fn setting<'a>(&'a mut self, setting: &mut Setting) -> Result<SettingUpdate<'a>> {
+        let parsed: RatelimiterSetting = setting.parse_extension(self.name())?;
+        if parsed == self.setting {
+            return Ok(Box::new(|| {}));
+        }
+        let limiters = parsed
             .event
             .iter()
-            .map(|q| GovernorRateLimiter::dashmap(q.quota()))
-            .collect::<Vec<_>>();
+            .enumerate()
+            .map(|(index, quota)| {
+                quota
+                    .quota()
+                    .map(GovernorRateLimiter::dashmap)
+                    .map_err(|err| {
+                        Error::Message(format!("invalid [rate_limiter] event[{index}]: {err}"))
+                    })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Box::new(move || {
+            self.setting = parsed;
+            self.event_limiters = limiters;
+        }))
     }
 
     fn message(
@@ -253,7 +274,7 @@ mod tests {
         now,
         secp256k1::{rand::thread_rng, Keypair},
     };
-    use nostr_relay::{create_web_app, Setting};
+    use nostr_relay::{create_web_app, setting::SettingWrapper, Setting};
 
     fn parse_text<T: serde::de::DeserializeOwned>(frame: &ws::Frame) -> Result<T> {
         if let ws::Frame::Text(text) = &frame {
@@ -290,6 +311,7 @@ mod tests {
         assert!(ranges[2].contains(39999));
         assert!(!ranges[2].contains(40000));
         assert_eq!(ranges, vec![Range(1, 2), Range(2, 3), Range(30000, 40000)]);
+        assert!(serde_json::from_str::<Vec<Range>>("[18446744073709551615]").is_err());
 
         let json = "[\"1\", 2, [30000, 40000]]";
         let ranges = serde_json::from_str::<Vec<Range>>(json);
@@ -333,6 +355,27 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn environment_overrides_typed_file_values() -> Result<()> {
+        let file = tempfile::Builder::new().suffix(".toml").tempfile()?;
+        std::fs::write(
+            file.path(),
+            "[rate_limiter]\nclear_interval = 30\n[[rate_limiter.event]]\nperiod = 1\nlimit = 3\nkinds = [1, [10, 20]]\n",
+        )?;
+        temp_env::with_var("RATE_ENV_RATE_LIMITER__ENABLED", Some("TRUE"), || {
+            let setting = Setting::read(file.path(), Some("RATE_ENV".to_owned()))?;
+            let parsed: RatelimiterSetting = setting.parse_extension("rate_limiter")?;
+            assert!(parsed.enabled);
+            assert_eq!(*parsed.clear_interval, Duration::from_secs(30));
+            assert_eq!(parsed.event[0].limit.get(), 3);
+            assert_eq!(
+                parsed.event[0].kinds,
+                Some(vec![Range(1, 2), Range(10, 20)])
+            );
+            Ok(())
+        })
+    }
+
     #[actix_rt::test]
     async fn check() -> Result<()> {
         let setting: SettingWrapper = Setting::default().into();
@@ -351,7 +394,7 @@ mod tests {
             )?;
         }
         let mut limiter = Ratelimiter::new();
-        limiter.setting(&setting);
+        limiter.setting(&mut setting.write())?();
         assert!(limiter.setting.enabled);
         assert_eq!(limiter.event_limiters.len(), 1);
         let lim = &limiter.event_limiters[0];
@@ -360,10 +403,53 @@ mod tests {
         assert!(lim.check_key(&ip).is_ok());
         assert!(lim.check_key(&ip).is_ok());
         assert!(lim.check_key(&ip).is_err());
+        let mut candidate = Setting::default();
+        candidate.extra.insert(
+            "rate_limiter".to_owned(),
+            serde_json::json!({
+                "enabled": false, "event": [{"period": "1ns", "limit": 2}]
+            }),
+        );
+        assert!(limiter.setting(&mut candidate).is_err());
+        candidate.extra.clear();
+        drop(limiter.setting(&mut candidate)?);
+        assert!(limiter.setting.enabled);
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
+        let lim = &limiter.event_limiters[0];
         sleep(Duration::from_millis(100)).await;
         assert!(lim.check_key(&ip).is_err());
         sleep(Duration::from_millis(1100)).await;
         assert!(lim.check_key(&ip).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn unrelated_reload_preserves_rate_limits() -> Result<()> {
+        let mut config = Setting::default();
+        config.extra.insert(
+            "rate_limiter".to_owned(),
+            serde_json::json!({
+                "enabled": true,
+                "event": [{"period": "1h", "limit": 1}]
+            }),
+        );
+        let setting: SettingWrapper = config.into();
+        let mut limiter = Ratelimiter::new();
+        limiter.setting(&mut setting.write())?();
+        let ip = "127.0.0.1".to_owned();
+        assert!(limiter.event_limiters[0].check_key(&ip).is_ok());
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
+
+        setting.write().information.name = "unrelated edit".to_owned();
+        limiter.setting(&mut setting.write())?();
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
+
+        setting.write().extra.get_mut("rate_limiter").unwrap()["event"][0]["limit"] =
+            serde_json::json!(2);
+        limiter.setting(&mut setting.write())?();
+        assert!(limiter.event_limiters[0].check_key(&ip).is_ok());
+        assert!(limiter.event_limiters[0].check_key(&ip).is_ok());
+        assert!(limiter.event_limiters[0].check_key(&ip).is_err());
         Ok(())
     }
 
@@ -389,7 +475,7 @@ mod tests {
             )?;
         }
 
-        let app = app.add_extension(Ratelimiter::new());
+        let app = app.add_extension(Ratelimiter::new())?;
         let app = web::Data::new(app);
 
         let mut srv = actix_test::start(move || create_web_app(app.clone()));

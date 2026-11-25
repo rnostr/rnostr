@@ -156,7 +156,7 @@ impl SubscriberIndex {
         }
 
         if let Some(subs) = self.subscriptions.get(&session_id) {
-            if subs.len() >= limit {
+            if subs.len() >= limit && !subs.contains_key(&sub_id) {
                 return Subscribed::Overlimit;
             }
         }
@@ -480,6 +480,49 @@ mod tests {
     //     id[31] = index;
     //     id
     // }
+
+    #[test]
+    fn replace_subscription_at_capacity() -> Result<()> {
+        let filters = |kind| {
+            vec![Filter {
+                kinds: vec![kind].into(),
+                ..Default::default()
+            }]
+        };
+        for limit in [2, 1] {
+            let mut index = SubscriberIndex::default();
+            assert_eq!(
+                index.add(1, "replace".into(), filters(1), 2),
+                Subscribed::Ok
+            );
+            assert_eq!(index.add(1, "keep".into(), filters(3), 2), Subscribed::Ok);
+            assert_eq!(
+                index.add(1, "extra".into(), filters(4), limit),
+                Subscribed::Overlimit
+            );
+            assert_eq!(
+                index.add(1, "replace".into(), filters(2), limit),
+                Subscribed::Ok
+            );
+            assert_eq!(index.subscriptions[&1].len(), 2);
+
+            for (kind, expected) in [(1, vec![]), (2, vec!["replace"]), (3, vec!["keep"])] {
+                let event = EventIndex::new([0; 32], [0; 32], 0, kind, &vec![])?;
+                let mut matches = vec![];
+                index.lookup(&event, |session, sub_id| {
+                    matches.push((*session, sub_id.clone()))
+                });
+                assert_eq!(
+                    matches,
+                    expected
+                        .into_iter()
+                        .map(|id| (1, id.to_owned()))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn index() -> Result<()> {

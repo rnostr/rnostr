@@ -1,5 +1,6 @@
 # Configuration
 # All duration format reference https://docs.rs/duration-str/latest/duration_str/
+# Invalid settings prevent startup; invalid reloads keep the previous configuration.
 #
 # config relay information
 [information]
@@ -102,12 +103,25 @@ enabled = false
 # event_pubkey_blacklist = ["xxxx"]
 # allow_mentioning_whitelisted_pubkeys = true
 
+# Event write policy (existing events remain readable)
+[event_policy]
+enabled = false
+# An enabled policy with an empty allowlist rejects all writes.
+# Invalid policies fail startup; invalid reloads keep the previous configuration.
+allowed_kinds = [1, 5, 30023, 30078]
+
+# Optional d-tag restrictions for kinds 30000–39999 in allowed_kinds.
+# The first d tag anywhere supplies the value; missing tags/values mean "".
+# Kinds omitted from this table accept any identifier.
+[event_policy.identifiers]
+"30078" = ["profile", "settings", "archive"]
+
 # IP Rate limiter extension
 [rate_limiter]
 enabled = false
 
 # # interval at second for clearing invalid data to free up memory.
-# # 0 will be converted to default 60 seconds
+# # Must be positive; default 60 seconds.
 # clear_interval = "60s"
 
 # # rate limiter ruler list when write event per user client IP
@@ -144,3 +158,37 @@ enabled = false
 # use carefully. see README.md#search
 [search]
 enabled = false
+
+# NIP-77 Negentropy set reconciliation extension
+# NEG-OPEN is a filter query, so it obeys the [auth.req] permission like REQ.
+[negentropy]
+# Disabling refuses new OPEN/MSG requests; accepted work can finish.
+enabled = false
+
+# # Largest event set one NEG-OPEN may reconcile over; larger sets are refused
+# # with `blocked:`. Each record costs about 40 bytes of memory while open.
+# max_records = 50000
+
+# # Concurrent reconciliations and in-flight jobs, fixed per connection.
+# # Changes apply to new connections.
+# # Opens wait up to 100 ms for a job slot; excess open sessions are refused.
+# max_sessions = 4
+
+# # Relay-wide job limit; positive and fixed at startup (restart to change).
+# # A NEG-OPEN over this relay-wide limit is refused; rounds wait for a free slot.
+# max_jobs = 16
+
+# # Snapshot scan deadline; must be positive. A shorter [data].db_query_timeout
+# # takes precedence.
+# scan_timeout = "5s"
+
+# # Ceiling on records held across every open reconciliation, relay-wide.
+# # 0 disables it.
+# max_total_records = 1000000
+
+# # Binary payload bytes; wire size is 2x + JSON. 0 disables splitting; minimum 4096.
+# frame_size_limit = 65536
+
+# # Client idle time, excluding queued or running work. 0 disables expiry.
+# # Reloads apply to existing reconciliations.
+# idle_timeout = "5m"

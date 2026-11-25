@@ -11,10 +11,26 @@ rayon = "1.10.0"
 anyhow = "1.0.86"
 colored = "2.1.0"
 tempfile = "3.12.0"
-nostr-db = { path = "../"}
+nostr-db = { path = "../", default-features = false }
 nostr-kv-bench = { path = "../../kv/bench"}
-charabia = "0.9.0"
+# Keep language features aligned with nostr-db, without dictionary downloads.
+charabia = { version = "0.9.0", default-features = false, features = [
+    "chinese",
+    "hebrew",
+    "thai",
+    "greek",
+    "khmer",
+    "vietnamese",
+    "swedish-recomposition",
+    "turkish",
+    "german-segmentation",
+] }
 twox-hash = "1.6.3"
+
+[features]
+default = ["search-japanese", "search-korean"]
+search-japanese = ["charabia/japanese", "nostr-db/search-japanese"]
+search-korean = ["charabia/korean", "nostr-db/search-korean"]
 
 [[bench]]
 name = "sort"
