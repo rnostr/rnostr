@@ -13,14 +13,14 @@ ARG BUILDER_DIR=/srv/rnostr
 ARG BASE=base
 
 # Base image
-FROM rust:1.80.1-slim-bullseye as base
+FROM rust:1.80.1-slim-bookworm as base
 
 # mirror image for china
 FROM base as mirror_cn
 
 # Replace cn mirrors
 ENV RUSTUP_DIST_SERVER=https://rsproxy.cn
-RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources
 RUN echo '[source.crates-io]\nreplace-with = "rsproxy-sparse"\n[source.rsproxy]\nregistry = "https://rsproxy.cn/crates.io-index"\n[source.rsproxy-sparse]\nregistry = "sparse+https://rsproxy.cn/index/"\n[registries.rsproxy]\nindex = "https://rsproxy.cn/crates.io-index"' >> $CARGO_HOME/config.toml
 
 FROM ${BASE} as chef
@@ -59,7 +59,7 @@ COPY . .
 RUN cargo build --release --target-dir "${BUILDER_DIR}" --bins
 
 # Final image with binaries
-FROM debian:bullseye-slim as final
+FROM debian:bookworm-slim as final
 
 ARG SRC_DIR
 ARG BUILDER_DIR
