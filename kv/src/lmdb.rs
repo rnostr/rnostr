@@ -454,9 +454,10 @@ impl<'txn> Iter<'txn> {
                                     }
                                     Ordering::Equal if self.dup => {
                                         // move to last value if the same key
-                                        // MDB_LAST_DUP will not return key
-                                        // self.op = ffi::MDB_LAST_DUP;
-                                        let _r = inner.get(ffi::MDB_LAST_DUP);
+                                        if let Err(err) = inner.move_to_last_dup() {
+                                            self.err = Some(err);
+                                            self.inner = None;
+                                        }
                                     }
                                     _ => {}
                                 };
@@ -621,6 +622,19 @@ impl<'txn> IterInner<'txn> {
             }
         }
     }
+
+    fn move_to_last_dup(&mut self) -> Result<()> {
+        let mut key = MaybeUninit::uninit();
+        let mut data = MaybeUninit::uninit();
+        unsafe {
+            lmdb_result(ffi::mdb_cursor_get(
+                self.cursor,
+                key.as_mut_ptr(),
+                data.as_mut_ptr(),
+                ffi::MDB_LAST_DUP,
+            ))
+        }
+    }
 }
 
 impl<'txn> Drop for IterInner<'txn> {
@@ -628,5 +642,37 @@ impl<'txn> Drop for IterInner<'txn> {
         unsafe {
             ffi::mdb_cursor_close(self.cursor);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn move_to_last_dup_positions_cursor_without_reading_outputs() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let db = Db::open(dir.path())?;
+        let tree = db.open_tree(Some("dup"), ffi::MDB_DUPSORT)?;
+
+        let mut writer = db.writer()?;
+        writer.put(&tree, b"i1", b"one")?;
+        writer.put(&tree, b"i1", b"two")?;
+        writer.commit()?;
+
+        let reader = db.reader()?;
+        let mut cursor = IterInner::new(&reader, tree.inner)?;
+        let first = cursor
+            .get_by_key(b"i1", ffi::MDB_SET_RANGE)?
+            .expect("the duplicate key should exist");
+        assert_eq!(first, (&b"i1"[..], &b"one"[..]));
+
+        cursor.move_to_last_dup()?;
+
+        let current = cursor
+            .get(ffi::MDB_GET_CURRENT)?
+            .expect("the cursor should remain on the duplicate key");
+        assert_eq!(current, (&b"i1"[..], &b"two"[..]));
+        Ok(())
     }
 }
