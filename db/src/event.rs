@@ -545,10 +545,16 @@ impl Event {
         Ok(())
     }
 
+    /// [NIP-26](https://github.com/nostr-protocol/nips/blob/master/26.md)
+    /// The indexed delegator must come from the only delegation tag, and that tag is verified.
     pub fn verify_delegation(&self) -> Result<(), Error> {
-        if self.index.delegator.is_some() {
-            for tag in self.tags() {
-                if tag.len() == 4 && tag[0] == "delegation" {
+        if let Some(delegator) = self.index.delegator() {
+            let mut tags = self
+                .tags()
+                .iter()
+                .filter(|tag| tag.first().is_some_and(|name| name == "delegation"));
+            if let (Some(tag), None) = (tags.next(), tags.next()) {
+                if tag.len() == 4 && hex::decode(&tag[1])? == delegator {
                     return verify_delegation(self, &tag[1], &tag[2], &tag[3]);
                 }
             }
@@ -876,6 +882,77 @@ mod tests {
             .to_string()
             .contains("older"));
 
+        Ok(())
+    }
+
+    /// Build a NIP-26 delegation tag signed by `delegator` for `delegatee`.
+    fn delegation_tag(delegator: &Keypair, delegatee: &Keypair, conditions: &str) -> Vec<String> {
+        let delegatee = XOnlyPublicKey::from_keypair(delegatee).0.serialize();
+        let token = Sha256::digest(format!(
+            "nostr:delegation:{}:{}",
+            hex::encode(delegatee),
+            conditions
+        ));
+        let sig = SECP256K1.sign_schnorr(&Message::from_digest_slice(&token).unwrap(), delegator);
+        vec![
+            "delegation".to_owned(),
+            hex::encode(XOnlyPublicKey::from_keypair(delegator).0.serialize()),
+            conditions.to_owned(),
+            hex::encode(sig.as_ref()),
+        ]
+    }
+
+    #[test]
+    fn delegation_binds_to_verified_tag() -> Result<()> {
+        let mut rng = thread_rng();
+        let delegator = Keypair::new_global(&mut rng);
+        let delegatee = Keypair::new_global(&mut rng);
+        let other = hex::encode(
+            XOnlyPublicKey::from_keypair(&Keypair::new_global(&mut rng))
+                .0
+                .serialize(),
+        );
+        let valid = delegation_tag(&delegator, &delegatee, "kind=1");
+        let validate = |tags: Vec<Vec<String>>| {
+            let event = Event::create(&delegatee, now(), 1, tags, String::new()).unwrap();
+            (event.validate(now(), 0, 0), event)
+        };
+
+        // a single valid delegation tag
+        let (result, event) = validate(vec![vec![], valid.clone()]);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            event.index().delegator(),
+            Some(&XOnlyPublicKey::from_keypair(&delegator).0.serialize())
+        );
+
+        // an unchecked delegation tag must not become the indexed delegator
+        let spoofed_tags = [
+            vec![valid.clone(), vec!["delegation".to_owned(), other.clone()]],
+            vec![
+                valid.clone(),
+                vec![
+                    "delegation".to_owned(),
+                    other.clone(),
+                    valid[2].clone(),
+                    valid[3].clone(),
+                ],
+            ],
+            vec![vec!["delegation".to_owned(), other.clone()], valid.clone()],
+            vec![valid.clone(), valid.clone()],
+        ];
+        for tags in spoofed_tags {
+            let (result, event) = validate(tags.clone());
+            assert!(
+                result.is_err(),
+                "accepted {tags:?}, delegator {:?}",
+                event.index().delegator()
+            );
+        }
+
+        // a delegation tag without conditions and signature is invalid
+        let (result, _) = validate(vec![vec!["delegation".to_owned(), other]]);
+        assert!(result.is_err());
         Ok(())
     }
 
