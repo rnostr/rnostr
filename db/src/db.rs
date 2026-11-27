@@ -241,7 +241,8 @@ impl Db {
             let v = &tag.1;
             // tag[0] == 'e'
             if kind == 5 && key[0] == 101 {
-                writer.put(&self.t_deletion, concat(index_event.id(), v), uid)?;
+                // Same key as the deleted check in `put`: target id + author of the deletion.
+                writer.put(&self.t_deletion, concat(v, pubkey), uid)?;
             }
             // Provide pubkey kind for filter
             writer.put(&self.t_tag, IndexKey::encode_tag(key, v, time), &tagval)?;

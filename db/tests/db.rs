@@ -1,4 +1,4 @@
-use nostr_db::{Db, Error, Event, Filter, IndexPairs, Stats};
+use nostr_db::{CheckEventResult, Db, Error, Event, Filter, IndexPairs, Stats};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::thread::sleep;
@@ -406,6 +406,65 @@ pub fn test_events_del() -> Result<()> {
         assert!(db.get::<Event, _, _>(&reader, id(prefix, 3))?.is_none());
     }
 
+    Ok(())
+}
+
+#[test]
+pub fn test_events_del_republish() -> Result<()> {
+    let db = create_db("test_events_del_republish")?;
+    let prefix = 0;
+    let event = |i, author_i: u8, kind, tags: Vec<Vec<String>>| -> Event {
+        MyEvent {
+            id: id(prefix, i),
+            pubkey: author(author_i),
+            kind,
+            tags,
+            ..Default::default()
+        }
+        .into()
+    };
+    let del = |i, author_i, target| {
+        event(
+            i,
+            author_i,
+            5,
+            vec![vec!["e".to_owned(), hex::encode(id(prefix, target))]],
+        )
+    };
+    let put = |e: &Event| -> Result<CheckEventResult> {
+        let mut writer = db.writer()?;
+        let r = db.put(&mut writer, e)?;
+        db.commit(writer)?;
+        Ok(r)
+    };
+    let exists = |i| -> Result<bool> {
+        let reader = db.reader()?;
+        Ok(db.get::<Event, _, _>(&reader, id(prefix, i))?.is_some())
+    };
+
+    // the deleted event can not be stored again
+    let original = event(1, 1, 1000, vec![]);
+    assert!(matches!(put(&original)?, CheckEventResult::Ok(1)));
+    assert!(matches!(put(&del(2, 1, 1))?, CheckEventResult::Ok(2)));
+    assert!(!exists(1)?);
+    assert!(matches!(put(&original)?, CheckEventResult::Deleted));
+    assert!(!exists(1)?);
+
+    // the deletion arrives before the event
+    assert!(matches!(put(&del(3, 1, 4))?, CheckEventResult::Ok(1)));
+    assert!(matches!(
+        put(&event(4, 1, 1000, vec![]))?,
+        CheckEventResult::Deleted
+    ));
+    assert!(!exists(4)?);
+
+    // a deletion from another author does not block the event
+    assert!(matches!(put(&del(5, 2, 6))?, CheckEventResult::Ok(1)));
+    assert!(matches!(
+        put(&event(6, 1, 1000, vec![]))?,
+        CheckEventResult::Ok(1)
+    ));
+    assert!(exists(6)?);
     Ok(())
 }
 
