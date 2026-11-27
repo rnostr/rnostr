@@ -1,6 +1,6 @@
 [package]
 name = "nostr-relay"
-version = "0.4.9"
+version = "0.5.0"
 description = "A high-performance and scalable nostr relay library."
 keywords = ["nostr", "nostr-relay"]
 edition.workspace = true
@@ -23,7 +23,7 @@ config = { version = "0.14.0", features = [
 duration-str = { version = "0.11.2", default-features = false }
 hex = "0.4.3"
 metrics = "0.23.0"
-nostr-db = { version = "0.4.5", path = "../db", default-features = false }
+nostr-db = { version = "0.5.0", path = "../db", default-features = false }
 notify = "6.1.1"
 num_cpus = "1.16.0"
 parking_lot = "0.12.3"

@@ -1,6 +1,6 @@
 [package]
 name = "nostr-db"
-version = "0.4.5"
+version = "0.5.0"
 description = "Nostr event database"
 keywords = ["nostr", "db", "lmdb"]
 exclude = [".gitignore"]
@@ -11,7 +11,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-nostr-kv = { version = "0.3.2", path = "../kv" }
+nostr-kv = { version = "0.4.0", path = "../kv" }
 thiserror = "1.0.63"
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.209", features = ["derive"] }
